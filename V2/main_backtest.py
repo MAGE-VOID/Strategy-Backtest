@@ -6,15 +6,10 @@ import Backtest_Engine as BT
 import visualize as VZ
 import StrategySignal as Signal
 
-# Display data on the MetaTrader 5 package
-print("MetaTrader5 package author: ", mt5.__author__)
-print("MetaTrader5 package version: ", mt5.__version__)
-
-# Establish connection to the MetaTrader 5 terminal
-mt5.initialize()
 
 # Connect to trading account specifying the Number, Server and Password
-CL.LoginAccount(51344621, "ICMarketsSC-Demo", "bCFNLB9k")
+CL.connect_and_login_mt5(51344621, "ICMarketsSC-Demo", "bCFNLB9k")
+
 
 # Uso de la función
 inp_start_date = datetime(2010, 1, 1)
@@ -33,9 +28,7 @@ symbols = [
     "USDCAD",
 ]
 
-df, df_standardized, df_manual_standardized = CL.Process_Data(
-    inp_start_date, inp_end_date, symbols, timeframe
-)
+df, df_standardized = CL.process_data(inp_start_date, inp_end_date, symbols, timeframe)
 
 bt_engine = BT.BacktestEngine(initial_balance=1000)
 resultBacktest = bt_engine.run_backtest(

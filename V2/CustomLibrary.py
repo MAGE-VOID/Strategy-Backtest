@@ -1,58 +1,58 @@
 import MetaTrader5 as mt5
 import pandas as pd
-import time
-import os
-from datetime import datetime
-from sklearn.preprocessing import StandardScaler
+import numpy as np
 
 
-def account_login(login, password, server):
-    if mt5.login(login, password, server):
-        print("logged in succesffully")
-    else:
-        print("login failed, error code: {}".format(mt5.last_error()))
+def connect_and_login_mt5(account, server, password, print_info=False):
+    """
+    Initialize the MetaTrader 5 terminal (without specifying a path)
+    and log in to a given account. If 'print_info' is True,
+    display account and terminal information upon successful login.
+    """
 
+    # Attempt to initialize the MetaTrader 5 platform
+    if not mt5.initialize():
+        error_code = mt5.last_error()
+        print(f"MT5 initialization failed, error code: {error_code}")
+        return
 
-def initialize(login, server, password, path):
+    # Attempt to log in to the specified account
+    if not mt5.login(account, password, server):
+        error_code = mt5.last_error()
+        print(f"Failed to log in to account #{account}, error code: {error_code}")
+        return
 
-    if not mt5.initialize(path):
-        print("initialize() failed, error code {}", mt5.last_error())
-    else:
-        account_login(login, password, server)
+    # If successfully connected, optionally display account and terminal info
+    if print_info:
 
+        # Display data on the MetaTrader 5 package
+        print("MetaTrader5 package author: ", mt5.__author__)
+        print("MetaTrader5 package version: ", mt5.__version__)
 
-def LoginAccount(account, servername, password_account, print_info=False):
-    # authorized = mt5.login(account, servername, password_account)
-    authorized = mt5.login(account, password_account, servername)
-    if authorized:
         account_info = mt5.account_info()
         terminal_info = mt5.terminal_info()
-        if print_info:
-            # Display trading account data in the form of a list
-            print("Successfully connected to account")
-            print("\nShow account_info(): ")
+
+        if account_info is not None:
+            print("Successfully connected to the account.")
+            print("\nAccount Information:")
             account_info_dict = account_info._asdict()
-            max_account_prop_len = max(len(prop) for prop in account_info_dict)
-
-            for prop in account_info_dict:
-                formatted_prop = prop.ljust(max_account_prop_len)
-                print("  {} = {}".format(formatted_prop, account_info_dict[prop]))
-
-            print("\nShow terminal_info(): ")
-            terminal_info_dict = terminal_info._asdict()
-            max_terminal_prop_len = max(len(prop) for prop in terminal_info_dict)
-
-            for prop in terminal_info_dict:
-                formatted_prop = prop.ljust(max_terminal_prop_len)
-                print("  {} = {}".format(formatted_prop, terminal_info_dict[prop]))
+            max_prop_len = max(len(prop) for prop in account_info_dict)
+            for prop, value in account_info_dict.items():
+                print(f"  {prop.ljust(max_prop_len)} = {value}")
         else:
-            print("Successfully connected to account #{}".format(account))
+            print("No account information available.")
+
+        if terminal_info is not None:
+            print("\nTerminal Information:")
+            terminal_info_dict = terminal_info._asdict()
+            max_prop_len = max(len(prop) for prop in terminal_info_dict)
+            for prop, value in terminal_info_dict.items():
+                print(f"  {prop.ljust(max_prop_len)} = {value}")
+        else:
+            print("No terminal information available.")
+
     else:
-        print(
-            "Failed to connect to account #{}, error code: {}".format(
-                account, mt5.last_error()
-            )
-        )
+        print(f"Successfully connected to account #{account}")
 
 
 def SymbolSync(SelectedSymbols, show_info=True):
@@ -133,72 +133,112 @@ def SymbolSync(SelectedSymbols, show_info=True):
         return "No están sincronizados los símbolos"
 
 
-def Process_Data(start_date, end_date, symbols, timeframe):
-    if not mt5.initialize():
-        print("Initialize() failed, error code =", mt5.last_error())
-        return None, None, None
+def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataFrame:
+    """
+    Fetches and prepares price data for a given symbol from MetaTrader 5.
+    Returns a DataFrame with columns: [Symbol, Open, High, Low, Close, Volume].
+    If no data is found, returns an empty DataFrame.
+    """
+    rates = mt5.copy_rates_range(symbol, timeframe, start_date, end_date)
+    if rates is None or len(rates) == 0:
+        print(f"No data found for symbol: {symbol}")
+        return pd.DataFrame()
 
-    symbols_data = {}
+    df = pd.DataFrame(rates)
+    df.drop(columns=["spread", "real_volume"], inplace=True, errors="ignore")
+    df.rename(
+        columns={
+            "time": "date",
+            "tick_volume": "Volume",
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+        },
+        inplace=True,
+    )
+    df["date"] = pd.to_datetime(df["date"], unit="s")
+    df.set_index("date", inplace=True)
+    df = df[["Open", "High", "Low", "Close", "Volume"]].astype("float64")
+    df.insert(0, "Symbol", symbol)
+    return df
+
+
+def _manual_standardize_numpy(
+    df: pd.DataFrame, symbol_col: str = "Symbol"
+) -> pd.DataFrame:
+    """
+    Manually standardize columns (Open, High, Low, Close, Volume) using NumPy
+    for improved performance on large datasets.
+
+    Returns a new DataFrame with standardized columns grouped by `symbol_col`.
+    """
+    # Columns to standardize
+    cols_to_std = ["Open", "High", "Low", "Close", "Volume"]
+
+    # Factorize symbols to get integer codes, ignoring the unique symbols array
+    symbol_codes = pd.factorize(df[symbol_col])[0]
+
+    # Convert the relevant columns to a NumPy array
+    arr = df[cols_to_std].to_numpy(dtype=np.float64)
+
+    # Prepare an array to store standardized data
+    arr_std = np.empty_like(arr)
+
+    # Standardize for each unique symbol code
+    for code in np.unique(symbol_codes):
+        mask = symbol_codes == code
+        sub_arr = arr[mask, :]
+        mean = sub_arr.mean(axis=0)
+        std = sub_arr.std(axis=0, ddof=0)  # ddof=0 for population std
+        arr_std[mask, :] = (sub_arr - mean) / std
+
+    # Create a new DataFrame and put the standardized values back
+    df_out = df.copy()
+    df_out[cols_to_std] = arr_std
+    return df_out
+
+
+def process_data(start_date, end_date, symbols, timeframe):
+    """
+    Fetches and consolidates OHLCV data for multiple symbols into a single DataFrame.
+    Also returns a manually standardized copy of that DataFrame, grouped by symbol.
+
+    Parameters:
+    -----------
+    start_date : datetime
+        The start date for fetching historical data.
+    end_date   : datetime
+        The end date for fetching historical data.
+    symbols    : list[str]
+        A list of symbol names (e.g., ["EURUSD", "GBPUSD"]).
+    timeframe  : int
+        The timeframe constant (e.g., mt5.TIMEFRAME_M5).
+
+    Returns:
+    --------
+    df_original: pd.DataFrame
+        Combined DataFrame of all symbols with columns: [Symbol, Open, High, Low, Close, Volume].
+        The 'date' is the DataFrame index.
+
+    df_standardized: pd.DataFrame
+        A copy of df_original, but with manual standardization of the OHLCV columns per symbol
+        using NumPy factorization (for potentially faster performance on large data).
+    """
+    all_data = []
     for symbol in symbols:
-        rates = mt5.copy_rates_range(symbol, timeframe, start_date, end_date)
-        if rates is None:
-            print(f"No data for {symbol}")
-            continue
-        df = pd.DataFrame(rates)
-        df.drop(columns=["spread", "real_volume"], inplace=True)
-        df.rename(
-            columns={
-                "time": "date",
-                "tick_volume": "Volume",
-                "open": "Open",
-                "high": "High",
-                "low": "Low",
-                "close": "Close",
-            },
-            inplace=True,
-        )
-        df["date"] = pd.to_datetime(df["date"], unit="s")
-        df.set_index("date", inplace=True)
-        df[["Open", "High", "Low", "Close", "Volume"]] = df[
-            ["Open", "High", "Low", "Close", "Volume"]
-        ].astype("float64")
-        symbols_data[symbol] = df
+        df_symbol = _fetch_symbol_data(symbol, timeframe, start_date, end_date)
+        if not df_symbol.empty:
+            all_data.append(df_symbol)
 
-    if not symbols_data:
-        print("No data available for the specified symbols and date range.")
-        return None, None, None
+    if not all_data:
+        print("No data available for any specified symbol within the date range.")
+        return None, None
 
-    # Concatenar los DataFrames de todos los símbolos
-    df = pd.concat(
-        symbols_data.values(), keys=symbols_data.keys(), names=["Symbol", "date"]
-    ).reset_index(level="Symbol")
+    # Concatenate all symbol data into a single DataFrame
+    df_original = pd.concat(all_data).sort_index()
 
-    # Copias para estandarizaciones
-    df_standardized = df.copy()
-    df_manual_standardized = df.copy()
+    # Manually standardize using NumPy-based approach
+    df_standardized = _manual_standardize_numpy(df_original)
 
-    # Estandarización manual
-    for symbol in symbols:
-        symbol_mask = df_manual_standardized["Symbol"] == symbol
-        cols = ["Open", "High", "Low", "Close", "Volume"]
-        df_symbol = df_manual_standardized.loc[symbol_mask, cols]
-
-        # Calcular la media y desviación estándar manualmente
-        mean = df_symbol.mean()
-        std = df_symbol.std()
-
-        # Estandarizar manualmente
-        df_manual_standardized.loc[symbol_mask, cols] = (df_symbol - mean) / std
-
-    # Estandarización con StandardScaler para comparar
-    from sklearn.preprocessing import StandardScaler
-
-    for symbol in symbols:
-        symbol_mask = df_standardized["Symbol"] == symbol
-        cols = ["Open", "High", "Low", "Close", "Volume"]
-        scaler = StandardScaler()
-        df_standardized.loc[symbol_mask, cols] = scaler.fit_transform(
-            df_standardized.loc[symbol_mask, cols]
-        )
-
-    return df, df_standardized, df_manual_standardized
+    return df_original, df_standardized
