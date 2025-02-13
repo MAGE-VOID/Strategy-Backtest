@@ -11,8 +11,8 @@ class EntryManager:
         self.first_position_tp = {}
         self.last_position_price = {}
         self.grid_positions = {}
-        self.tp_distance = self.strategies_params.get("tp_distance", 1000)
-        self.grid_distance = self.strategies_params.get("grid_distance", 1000)
+        self.tp_distance = self.strategies_params.get("tp_distance", 100)
+        self.grid_distance = self.strategies_params.get("grid_distance", 100)
         self.lot_multiplier = self.strategies_params.get("lot_multiplier", 1.35)
         self.initial_lot_size = self.strategies_params.get("initial_lot_size", 0.01)
 

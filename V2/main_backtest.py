@@ -32,7 +32,7 @@ df, df_standardized = CL.process_data(inp_start_date, inp_end_date, symbols, tim
 
 bt_engine = BT.BacktestEngine(initial_balance=1000)
 resultBacktest = bt_engine.run_backtest(
-    df_standardized, strategy_name="grid_buy", strategy_signal_class=Signal.StrategySignal
+    df, strategy_name="grid_buy", strategy_signal_class=Signal.StrategySignal
 )
 
 # Obtener las estadísticas del backtest
