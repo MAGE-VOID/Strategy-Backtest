@@ -55,84 +55,6 @@ def connect_and_login_mt5(account, server, password, print_info=False):
         print(f"Successfully connected to account #{account}")
 
 
-def SymbolSync(SelectedSymbols, show_info=True):
-    # Obtener la lista de todos los símbolos disponibles
-    all_symbols = [symbol.name for symbol in mt5.symbols_get()]
-
-    # Convertir la lista de símbolos seleccionados en un conjunto para una búsqueda más eficiente
-    selected_symbols_set = set(SelectedSymbols.split(", "))
-
-    # Crear una lista para mantener la información detallada de los símbolos
-    symbol_details = []
-
-    for index, symbol in enumerate(selected_symbols_set, start=1):
-        if symbol in all_symbols:
-            # Obtener información detallada del símbolo
-            symbol_info = mt5.symbol_info(symbol)
-            mt5.symbol_select(symbol, True)
-            mt5.symbol_info_tick(symbol)
-
-            # Verificar si el símbolo está sincronizado o no
-            is_synced = "Yes" if symbol_info is not None else "No"
-
-            # Agregar información a la lista
-            symbol_details.append(
-                {
-                    "Orden": index,
-                    "Símbolo": symbol,
-                    "Spread": symbol_info.spread,
-                    "Sincronizado": is_synced,
-                    "Select": symbol_info.select,
-                    "Visible": symbol_info.visible,
-                    "Time": symbol_info.time,
-                    "Digits": symbol_info.digits,
-                    "Spread_Float": symbol_info.spread_float,
-                    "Trade_Mode": symbol_info.trade_mode,
-                    "Trade_ExeMode": symbol_info.trade_exemode,
-                    "Swap_Mode": symbol_info.swap_mode,
-                    "Swap_Rollover3days": symbol_info.swap_rollover3days,
-                    "Expiration_Mode": symbol_info.expiration_mode,
-                    "Filling_Mode": symbol_info.filling_mode,
-                    "Order_Mode": symbol_info.order_mode,
-                    "Bid": symbol_info.bid,
-                    "BidHigh": symbol_info.bidhigh,
-                    "BidLow": symbol_info.bidlow,
-                    "Ask": symbol_info.ask,
-                    "AskHigh": symbol_info.askhigh,
-                    "AskLow": symbol_info.asklow,
-                    "Point": symbol_info.point,
-                    "Trade_Tick_Value": symbol_info.trade_tick_value,
-                    "Trade_Tick_Value_Profit": symbol_info.trade_tick_value_profit,
-                    "Trade_Tick_Value_Loss": symbol_info.trade_tick_value_loss,
-                    "Trade_Tick_Size": symbol_info.trade_tick_size,
-                    "Volume_Min": symbol_info.volume_min,
-                    "Volume_Max": symbol_info.volume_max,
-                    "Volume_Step": symbol_info.volume_step,
-                    "Swap_Long": symbol_info.swap_long,
-                    "Swap_Short": symbol_info.swap_short,
-                    "Session_Open": symbol_info.session_open,
-                    "Session_Close": symbol_info.session_close,
-                    "Price_Change": symbol_info.price_change,
-                }
-            )
-
-    # Comprobar si todos los símbolos están sincronizados
-    all_synced = all(detail["Sincronizado"] == "Yes" for detail in symbol_details)
-
-    # Mostrar el estado de sincronización si show_info es True en un dataframe
-    if show_info:
-        df = pd.DataFrame(symbol_details)
-        pd.set_option("display.max_rows", None)  # Mostrar todas las filas
-        pd.set_option("display.max_columns", None)  # Mostrar todas las columnas
-        print(df)
-
-    # Devolver la lista de símbolos sincronizados
-    if all_synced:
-        return list(selected_symbols_set)
-    else:
-        return "No están sincronizados los símbolos"
-
-
 def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataFrame:
     """
     Fetches and prepares price data for a given symbol from MetaTrader 5.
@@ -242,3 +164,81 @@ def process_data(start_date, end_date, symbols, timeframe):
     df_standardized = _manual_standardize_numpy(df_original)
 
     return df_original, df_standardized
+
+
+def SymbolSync(SelectedSymbols, show_info=True):
+    # Obtener la lista de todos los símbolos disponibles
+    all_symbols = [symbol.name for symbol in mt5.symbols_get()]
+
+    # Convertir la lista de símbolos seleccionados en un conjunto para una búsqueda más eficiente
+    selected_symbols_set = set(SelectedSymbols.split(", "))
+
+    # Crear una lista para mantener la información detallada de los símbolos
+    symbol_details = []
+
+    for index, symbol in enumerate(selected_symbols_set, start=1):
+        if symbol in all_symbols:
+            # Obtener información detallada del símbolo
+            symbol_info = mt5.symbol_info(symbol)
+            mt5.symbol_select(symbol, True)
+            mt5.symbol_info_tick(symbol)
+
+            # Verificar si el símbolo está sincronizado o no
+            is_synced = "Yes" if symbol_info is not None else "No"
+
+            # Agregar información a la lista
+            symbol_details.append(
+                {
+                    "Orden": index,
+                    "Símbolo": symbol,
+                    "Spread": symbol_info.spread,
+                    "Sincronizado": is_synced,
+                    "Select": symbol_info.select,
+                    "Visible": symbol_info.visible,
+                    "Time": symbol_info.time,
+                    "Digits": symbol_info.digits,
+                    "Spread_Float": symbol_info.spread_float,
+                    "Trade_Mode": symbol_info.trade_mode,
+                    "Trade_ExeMode": symbol_info.trade_exemode,
+                    "Swap_Mode": symbol_info.swap_mode,
+                    "Swap_Rollover3days": symbol_info.swap_rollover3days,
+                    "Expiration_Mode": symbol_info.expiration_mode,
+                    "Filling_Mode": symbol_info.filling_mode,
+                    "Order_Mode": symbol_info.order_mode,
+                    "Bid": symbol_info.bid,
+                    "BidHigh": symbol_info.bidhigh,
+                    "BidLow": symbol_info.bidlow,
+                    "Ask": symbol_info.ask,
+                    "AskHigh": symbol_info.askhigh,
+                    "AskLow": symbol_info.asklow,
+                    "Point": symbol_info.point,
+                    "Trade_Tick_Value": symbol_info.trade_tick_value,
+                    "Trade_Tick_Value_Profit": symbol_info.trade_tick_value_profit,
+                    "Trade_Tick_Value_Loss": symbol_info.trade_tick_value_loss,
+                    "Trade_Tick_Size": symbol_info.trade_tick_size,
+                    "Volume_Min": symbol_info.volume_min,
+                    "Volume_Max": symbol_info.volume_max,
+                    "Volume_Step": symbol_info.volume_step,
+                    "Swap_Long": symbol_info.swap_long,
+                    "Swap_Short": symbol_info.swap_short,
+                    "Session_Open": symbol_info.session_open,
+                    "Session_Close": symbol_info.session_close,
+                    "Price_Change": symbol_info.price_change,
+                }
+            )
+
+    # Comprobar si todos los símbolos están sincronizados
+    all_synced = all(detail["Sincronizado"] == "Yes" for detail in symbol_details)
+
+    # Mostrar el estado de sincronización si show_info es True en un dataframe
+    if show_info:
+        df = pd.DataFrame(symbol_details)
+        pd.set_option("display.max_rows", None)  # Mostrar todas las filas
+        pd.set_option("display.max_columns", None)  # Mostrar todas las columnas
+        print(df)
+
+    # Devolver la lista de símbolos sincronizados
+    if all_synced:
+        return list(selected_symbols_set)
+    else:
+        return "No están sincronizados los símbolos"
