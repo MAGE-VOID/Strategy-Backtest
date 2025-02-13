@@ -57,9 +57,8 @@ def connect_and_login_mt5(account, server, password, print_info=False):
 
 def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataFrame:
     """
-    Fetches and prepares price data for a given symbol from MetaTrader 5.
-    Returns a DataFrame with columns: [Symbol, Open, High, Low, Close, Volume].
-    If no data is found, returns an empty DataFrame.
+    Descarga y prepara los datos de un símbolo desde MetaTrader 5.
+    Retorna un DataFrame con columnas: [Symbol, Open, High, Low, Close, Volume].
     """
     rates = mt5.copy_rates_range(symbol, timeframe, start_date, end_date)
     if rates is None or len(rates) == 0:
@@ -86,82 +85,51 @@ def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataF
     return df
 
 
-def _manual_standardize_numpy(
-    df: pd.DataFrame, symbol_col: str = "Symbol"
-) -> pd.DataFrame:
+def _standardize_symbol_data(df_symbol: pd.DataFrame) -> pd.DataFrame:
     """
-    Manually standardize columns (Open, High, Low, Close, Volume) using NumPy
-    for improved performance on large datasets.
-
-    Returns a new DataFrame with standardized columns grouped by `symbol_col`.
+    Estandariza las columnas OHLCV de un DataFrame que pertenece a un solo símbolo,
+    usando la media y desviación estándar de ese símbolo.
     """
-    # Columns to standardize
-    cols_to_std = ["Open", "High", "Low", "Close", "Volume"]
+    cols = ["Open", "High", "Low", "Close", "Volume"]
+    mean_vals = df_symbol[cols].mean()
+    std_vals = df_symbol[cols].std(ddof=0)
 
-    # Factorize symbols to get integer codes, ignoring the unique symbols array
-    symbol_codes = pd.factorize(df[symbol_col])[0]
+    std_vals = std_vals.replace({0: 1e-9})
 
-    # Convert the relevant columns to a NumPy array
-    arr = df[cols_to_std].to_numpy(dtype=np.float64)
-
-    # Prepare an array to store standardized data
-    arr_std = np.empty_like(arr)
-
-    # Standardize for each unique symbol code
-    for code in np.unique(symbol_codes):
-        mask = symbol_codes == code
-        sub_arr = arr[mask, :]
-        mean = sub_arr.mean(axis=0)
-        std = sub_arr.std(axis=0, ddof=0)  # ddof=0 for population std
-        arr_std[mask, :] = (sub_arr - mean) / std
-
-    # Create a new DataFrame and put the standardized values back
-    df_out = df.copy()
-    df_out[cols_to_std] = arr_std
-    return df_out
+    df_symbol_std = df_symbol.copy()
+    df_symbol_std[cols] = (df_symbol_std[cols] - mean_vals) / std_vals
+    return df_symbol_std
 
 
 def process_data(start_date, end_date, symbols, timeframe):
     """
-    Fetches and consolidates OHLCV data for multiple symbols into a single DataFrame.
-    Also returns a manually standardized copy of that DataFrame, grouped by symbol.
+    1) Descarga los datos para cada símbolo.
+    2) Estandariza cada DataFrame individualmente (si se desea).
+    3) Concatena los DataFrames finales (sin exponer resultados parciales).
 
-    Parameters:
-    -----------
-    start_date : datetime
-        The start date for fetching historical data.
-    end_date   : datetime
-        The end date for fetching historical data.
-    symbols    : list[str]
-        A list of symbol names (e.g., ["EURUSD", "GBPUSD"]).
-    timeframe  : int
-        The timeframe constant (e.g., mt5.TIMEFRAME_M5).
-
-    Returns:
-    --------
-    df_original: pd.DataFrame
-        Combined DataFrame of all symbols with columns: [Symbol, Open, High, Low, Close, Volume].
-        The 'date' is the DataFrame index.
-
-    df_standardized: pd.DataFrame
-        A copy of df_original, but with manual standardization of the OHLCV columns per symbol
-        using NumPy factorization (for potentially faster performance on large data).
+    Retorna un par de DataFrames:
+      - df_original: datos sin estandarizar
+      - df_standardized: datos estandarizados, de igual forma y tamaño
     """
-    all_data = []
+    df_list_original = []
+    df_list_standardized = []
+
     for symbol in symbols:
         df_symbol = _fetch_symbol_data(symbol, timeframe, start_date, end_date)
-        if not df_symbol.empty:
-            all_data.append(df_symbol)
+        if df_symbol.empty:
+            continue
 
-    if not all_data:
+        df_symbol_std = _standardize_symbol_data(df_symbol)
+
+        df_list_original.append(df_symbol)
+        df_list_standardized.append(df_symbol_std)
+
+    if not df_list_original:
         print("No data available for any specified symbol within the date range.")
         return None, None
 
-    # Concatenate all symbol data into a single DataFrame
-    df_original = pd.concat(all_data).sort_index()
-
-    # Manually standardize using NumPy-based approach
-    df_standardized = _manual_standardize_numpy(df_original)
+    df_original = pd.concat(df_list_original).sort_index()
+    df_standardized = pd.concat(df_list_standardized).sort_index()
 
     return df_original, df_standardized
 
