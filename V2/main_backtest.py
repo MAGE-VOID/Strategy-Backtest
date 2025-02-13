@@ -36,17 +36,17 @@ bt_engine = BT.BacktestEngine(initial_balance=1000)
 
 # Usar cProfile para medir el rendimiento del backtest
 profiler = cProfile.Profile()
-profiler.enable()
+profiler.enable()  # Comienza a registrar el perfilado
 
 # Ejecutar el backtest
 resultBacktest = bt_engine.run_backtest(
     df, strategy_name="grid_buy", strategy_signal_class=Signal.StrategySignal
 )
 
-profiler.disable()
+profiler.disable()  # Deja de registrar el perfilado
 
 # Guardar el resultado del perfilado en un archivo
-profiler.dump_stats("backtest_profile.prof")
+profiler.dump_stats('backtest_profile.prof')
 
 # Obtener y mostrar las estadísticas del backtest
 statistics = resultBacktest["statistics"]
@@ -54,8 +54,6 @@ stats_df = pd.DataFrame.from_dict(statistics, orient="index", columns=["Value"])
 stats_df["Value"] = stats_df["Value"].apply(
     lambda x: f"{x:,.2f}" if isinstance(x, (int, float)) else x
 )
-
-# Mostrar las estadísticas
 print("\n--- Backtest Statistics ---")
 print(stats_df)
 
