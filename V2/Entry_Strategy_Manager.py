@@ -90,15 +90,13 @@ class EntryManager:
             last_price = self.last_position_price[symbol]
             grid_distance = self.grid_distance * self.get_symbol_points(symbol)
             if current_price <= last_price - grid_distance:
-                self._add_grid_position(symbol, current_price)
+                self._add_grid_position(symbol, current_price, date)
 
-    def _add_grid_position(self, symbol, current_price):
+    def _add_grid_position(self, symbol, current_price, date):
         lot_size = self.calculate_lot_size(symbol)
-        self._open_position(symbol, current_price, None, is_buy=True, lot_size=lot_size)
-
+        self._open_position(symbol, current_price, date, is_buy=True, lot_size=lot_size)
         self.last_position_price[symbol] = current_price
         self.grid_positions[symbol] += 1
-
         self.update_tp(symbol)
 
     def update_tp(self, symbol):
@@ -132,7 +130,6 @@ class EntryManager:
         for ticket, position in positions.items():
             if position["position"] == "long":
                 self.position_manager.close_position(ticket, current_price, date)
-
         self.clear_symbol_data(symbol)
 
     def clear_symbol_data(self, symbol):
