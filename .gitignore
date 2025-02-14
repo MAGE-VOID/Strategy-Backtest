@@ -1,0 +1,7 @@
+# Ignorar directorios __pycache__ en cualquier parte del proyecto
+__pycache__/
+
+# Opcional: Ignorar archivos compilados de Python
+*.pyc
+*.pyo
+*$py.class
