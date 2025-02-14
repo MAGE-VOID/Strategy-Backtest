@@ -60,8 +60,10 @@ class EntryManager:
                 symbol, signal_sell, current_price, date, index, is_buy=False
             )
         elif strategy_name == "grid_buy":
-            if signal_buy[index]:
+            # Aquí ya no se necesita indexar, ya que signal_buy es un bool
+            if signal_buy:  # Cambiado de signal_buy[index] a signal_buy directamente
                 self.grid_buy(symbol, current_price, date)
+
 
     def _execute_trade(self, symbol, signals, current_price, date, index, is_buy=True):
         if signals[index] and not self.get_positions(

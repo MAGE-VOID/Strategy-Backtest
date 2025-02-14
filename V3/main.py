@@ -47,5 +47,5 @@ print(stats_df)
 # Llamar a la función para graficar equity y balance
 VZ.plot_equity_balance(resultBacktest)
 
-# Graficar las señales para un símbolo específico
+# Graficar las señales para un símbolo específico-
 # VZ.plot_price_with_signals(resultBacktest, df, "EURUSD")

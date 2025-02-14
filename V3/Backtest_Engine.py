@@ -81,13 +81,15 @@ class BacktestEngine:
             signal_generators = {
                 symbol: strategy_signal_class(group) for symbol, group in grouped_data
             }
+
+            # Modificación aquí: Se cambió `generate_signals()` por `generate_signals_for_candle(index)`
             signals = {
-                symbol: signal_generators[symbol].generate_signals()
-                for symbol in signal_generators.keys()
+                symbol: signal_generators[symbol] for symbol in signal_generators.keys()
             }
             return all_dates, filled_data, signals
 
         return all_dates, filled_data, None
+
 
     def _get_current_prices(self, filled_data, index):
         return {
@@ -100,11 +102,13 @@ class BacktestEngine:
         self, strategy_name, signals, current_prices, date, index
     ):
         for symbol, price in current_prices.items():
-            signal_buy, signal_sell = signals[symbol]
+            # Llamada a StrategySignal para generar las señales de compra y venta
+            signal_buy, signal_sell = signals[symbol].generate_signals_for_candle(index)
             self.strategy_manager.manage_tp_sl(symbol, price, date)
             self.strategy_manager.apply_strategy(
                 strategy_name, symbol, signal_buy, signal_sell, price, index, date
             )
+
 
     def _update_equity(self, current_prices, date):
         equity = self._calculate_equity(current_prices)
