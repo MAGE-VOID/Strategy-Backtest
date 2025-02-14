@@ -6,7 +6,10 @@ class StrategySignal:
         # Pre-calculemos los arrays para acelerar cada llamada
         self.required_data_length = 1000  # Número de velas necesarias para el cálculo
         self.open_prices = InputData["Open"].values
+        self.high_prices = InputData["High"].values
+        self.low_prices = InputData["Low"].values
         self.close_prices = InputData["Close"].values
+        self.volumes = InputData["Volume"].values
 
     def generate_signals_for_candle(self, index):
         """
@@ -17,11 +20,9 @@ class StrategySignal:
             return False, False
 
         # Ejemplo de cálculo simple de señales:
-        signal_buy = (
-            self.close_prices[index] > self.open_prices[index]
-        )  # Compra si la vela es alcista
-        signal_sell = (
-            self.close_prices[index] < self.open_prices[index]
-        )  # Venta si la vela es bajista
+        # Compra si la vela es alcista (Close > Open)
+        signal_buy = self.close_prices[index] > self.open_prices[index]
+        # Venta si la vela es bajista (Close < Open)
+        signal_sell = self.close_prices[index] < self.open_prices[index]
 
         return signal_buy, signal_sell
