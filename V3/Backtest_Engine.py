@@ -23,6 +23,7 @@ class BacktestEngine:
         self._initialize_managers()
         self.equity_over_time.clear()
 
+        # Preprocesamiento (ordenar, etc.)
         InputData = self._preprocess_data(InputData)
         all_dates, filled_data, signals = self._prepare_data(
             InputData, strategy_signal_class
@@ -32,18 +33,38 @@ class BacktestEngine:
             print("No se pasó ninguna clase de señales. Terminando el backtest.")
             return
 
+        # Precalcular las longitudes de cada serie para evitar múltiples llamadas a len()
+        symbol_lengths = {symbol: arr.shape[0] for symbol, arr in filled_data.items()}
+
+        # Guardar en variables locales objetos usados en el loop
+        strategy_manager = self.strategy_manager
+        total_steps = len(all_dates)
+
         with tqdm(
-            total=len(all_dates), desc="Running backtest", unit="step", ascii=True
+            total=total_steps, desc="Running backtest", unit="step", ascii=True
         ) as pbar:
             for i, date in enumerate(all_dates):
-                current_prices = self._get_current_prices(filled_data, i)
+                # Obtención de precios actuales usando los arrays y las longitudes precalculadas
+                current_prices = {
+                    symbol: arr[i]
+                    for symbol, arr in filled_data.items()
+                    if i < symbol_lengths[symbol]
+                }
                 if not current_prices:
                     pbar.update(1)
                     continue
 
-                self._process_signals_and_apply_strategy(
-                    strategy_name, signals, current_prices, date, i
-                )
+                # Procesamos señales y ejecutamos estrategias
+                for symbol, price in current_prices.items():
+                    # Se guarda en variable local el objeto de señales para evitar búsquedas repetidas
+                    strategy_obj = signals[symbol]
+                    signal_buy, signal_sell = strategy_obj.generate_signals_for_candle(
+                        i
+                    )
+                    strategy_manager.manage_tp_sl(symbol, price, date)
+                    strategy_manager.apply_strategy(
+                        strategy_name, symbol, signal_buy, signal_sell, price, i, date
+                    )
 
                 self._update_equity(current_prices, date)
                 pbar.update(1)
@@ -52,14 +73,14 @@ class BacktestEngine:
             self._debug_positions()
 
         statistics_calculator = Statistics(
-            self.strategy_manager.get_results(),
+            strategy_manager.get_results(),
             self.equity_over_time,
             self.initial_balance,
         )
         statistics = statistics_calculator.calculate_statistics()
 
         return {
-            "trades": self.strategy_manager.get_results(),
+            "trades": strategy_manager.get_results(),
             "equity_over_time": self.equity_over_time,
             "statistics": statistics,
         }
@@ -78,35 +99,13 @@ class BacktestEngine:
         filled_data = {symbol: group["Open"].values for symbol, group in grouped_data}
 
         if strategy_signal_class:
+            # Creamos el objeto de señales para cada símbolo
             signal_generators = {
                 symbol: strategy_signal_class(group) for symbol, group in grouped_data
             }
-
-            # Modificación aquí: Se cambió `generate_signals()` por `generate_signals_for_candle(index)`
-            signals = {
-                symbol: signal_generators[symbol] for symbol in signal_generators.keys()
-            }
-            return all_dates, filled_data, signals
+            return all_dates, filled_data, signal_generators
 
         return all_dates, filled_data, None
-
-    def _get_current_prices(self, filled_data, index):
-        return {
-            symbol: filled_data[symbol][index]
-            for symbol in filled_data
-            if index < len(filled_data[symbol])
-        }
-
-    def _process_signals_and_apply_strategy(
-        self, strategy_name, signals, current_prices, date, index
-    ):
-        for symbol, price in current_prices.items():
-            # Llamada a StrategySignal para generar las señales de compra y venta
-            signal_buy, signal_sell = signals[symbol].generate_signals_for_candle(index)
-            self.strategy_manager.manage_tp_sl(symbol, price, date)
-            self.strategy_manager.apply_strategy(
-                strategy_name, symbol, signal_buy, signal_sell, price, index, date
-            )
 
     def _update_equity(self, current_prices, date):
         equity = self._calculate_equity(current_prices)
@@ -126,14 +125,13 @@ class BacktestEngine:
         """Calcula el equity basado en las posiciones abiertas y los precios actuales."""
         equity = self.strategy_manager.get_balance()
         positions = self.strategy_manager.get_positions()
-
         for pos in positions.values():
-            current_price = current_prices.get(pos["symbol"], 0)
-            if current_price:
+            cp = current_prices.get(pos["symbol"], 0)
+            if cp:
                 floating_profit = (
-                    (current_price - pos["entry_price"]) * pos["lot_size"]
+                    (cp - pos["entry_price"]) * pos["lot_size"]
                     if pos["position"] == "long"
-                    else (pos["entry_price"] - current_price) * pos["lot_size"]
+                    else (pos["entry_price"] - cp) * pos["lot_size"]
                 )
                 equity += floating_profit
         return equity
