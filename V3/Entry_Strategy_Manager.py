@@ -95,16 +95,18 @@ class EntryManager:
         long_positions = self.get_positions(symbol, "long")
         if not long_positions:
             return
-        entry_prices = np.array([pos["entry_price"] for pos in long_positions.values()])
-        lot_sizes = np.array([pos["lot_size"] for pos in long_positions.values()])
+        positions = list(long_positions.values())
+        entry_prices = np.array([pos["entry_price"] for pos in positions])
+        lot_sizes = np.array([pos["lot_size"] for pos in positions])
         total_lots = lot_sizes.sum()
         if total_lots == 0:
             return
         average_price = np.dot(entry_prices, lot_sizes) / total_lots
         new_tp = average_price + self.tp_distance * self.get_symbol_points(symbol)
         self.first_position_tp[symbol] = new_tp
-        for position in long_positions.values():
+        for position in positions:
             position["tp"] = new_tp
+
 
     def manage_tp_sl(self, symbol, current_price, date):
         if (

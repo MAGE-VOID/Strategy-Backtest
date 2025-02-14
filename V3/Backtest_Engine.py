@@ -96,16 +96,16 @@ class BacktestEngine:
         """Genera los datos y señales utilizando la clase de señal proporcionada."""
         all_dates = InputData.index.unique()
         grouped_data = InputData.groupby("Symbol")
-        filled_data = {symbol: group["Open"].values for symbol, group in grouped_data}
+        filled_data = {}
+        signal_generators = {} if strategy_signal_class else None
 
-        if strategy_signal_class:
-            # Creamos el objeto de señales para cada símbolo
-            signal_generators = {
-                symbol: strategy_signal_class(group) for symbol, group in grouped_data
-            }
-            return all_dates, filled_data, signal_generators
+        for symbol, group in grouped_data:
+            filled_data[symbol] = group["Open"].values
+            if strategy_signal_class:
+                signal_generators[symbol] = strategy_signal_class(group)
 
-        return all_dates, filled_data, None
+        return all_dates, filled_data, signal_generators
+
 
     def _update_equity(self, current_prices, date):
         equity = self._calculate_equity(current_prices)
