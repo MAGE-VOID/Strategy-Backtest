@@ -26,9 +26,7 @@ symbols = [
     "USDCAD",
 ]
 
-df, df_standardized = CL.process_data(
-    inp_start_date, inp_end_date, symbols, timeframe
-)
+df, df_standardized = CL.process_data(inp_start_date, inp_end_date, symbols, timeframe)
 
 bt_engine = BT.BacktestEngine(initial_balance=1000)
 resultBacktest = bt_engine.run_backtest(

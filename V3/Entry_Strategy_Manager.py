@@ -28,14 +28,12 @@ class EntryManager:
         point = self.get_symbol_points(symbol)
         tp_distance = self.tp_distance * point
         sl_distance = self.strategies_params.get("sl_distance", None)
-
         if is_buy:
             tp = current_price + tp_distance
             sl = current_price - sl_distance * point if sl_distance else None
         else:
             tp = current_price - tp_distance
             sl = current_price + sl_distance * point if sl_distance else None
-
         return tp, sl
 
     def calculate_lot_size(self, symbol):
@@ -52,23 +50,15 @@ class EntryManager:
         self, strategy_name, symbol, signal_buy, signal_sell, current_price, index, date
     ):
         if strategy_name == "simple_buy":
-            self._execute_trade(
-                symbol, signal_buy, current_price, date, index, is_buy=True
-            )
+            self._execute_trade(symbol, signal_buy, current_price, date, is_buy=True)
         elif strategy_name == "simple_sell":
-            self._execute_trade(
-                symbol, signal_sell, current_price, date, index, is_buy=False
-            )
+            self._execute_trade(symbol, signal_sell, current_price, date, is_buy=False)
         elif strategy_name == "grid_buy":
-            # Aquí ya no se necesita indexar, ya que signal_buy es un bool
-            if signal_buy:  # Cambiado de signal_buy[index] a signal_buy directamente
+            if signal_buy:  # Ya es un booleano, no se indexa
                 self.grid_buy(symbol, current_price, date)
 
-
-    def _execute_trade(self, symbol, signals, current_price, date, index, is_buy=True):
-        if signals[index] and not self.get_positions(
-            symbol, "long" if is_buy else "short"
-        ):
+    def _execute_trade(self, symbol, signal, current_price, date, is_buy=True):
+        if signal and not self.get_positions(symbol, "long" if is_buy else "short"):
             self._open_position(
                 symbol, current_price, date, is_buy, self.initial_lot_size
             )
@@ -97,28 +87,22 @@ class EntryManager:
     def _add_grid_position(self, symbol, current_price):
         lot_size = self.calculate_lot_size(symbol)
         self._open_position(symbol, current_price, None, is_buy=True, lot_size=lot_size)
-
         self.last_position_price[symbol] = current_price
         self.grid_positions[symbol] += 1
-
         self.update_tp(symbol)
 
     def update_tp(self, symbol):
         long_positions = self.get_positions(symbol, "long")
         if not long_positions:
             return
-
         entry_prices = np.array([pos["entry_price"] for pos in long_positions.values()])
         lot_sizes = np.array([pos["lot_size"] for pos in long_positions.values()])
         total_lots = lot_sizes.sum()
-
         if total_lots == 0:
             return
-
         average_price = np.dot(entry_prices, lot_sizes) / total_lots
         new_tp = average_price + self.tp_distance * self.get_symbol_points(symbol)
         self.first_position_tp[symbol] = new_tp
-
         for position in long_positions.values():
             position["tp"] = new_tp
 
@@ -134,7 +118,6 @@ class EntryManager:
         for ticket, position in positions.items():
             if position["position"] == "long":
                 self.position_manager.close_position(ticket, current_price, date)
-
         self.clear_symbol_data(symbol)
 
     def clear_symbol_data(self, symbol):

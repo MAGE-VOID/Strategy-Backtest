@@ -90,7 +90,6 @@ class BacktestEngine:
 
         return all_dates, filled_data, None
 
-
     def _get_current_prices(self, filled_data, index):
         return {
             symbol: filled_data[symbol][index]
@@ -108,7 +107,6 @@ class BacktestEngine:
             self.strategy_manager.apply_strategy(
                 strategy_name, symbol, signal_buy, signal_sell, price, index, date
             )
-
 
     def _update_equity(self, current_prices, date):
         equity = self._calculate_equity(current_prices)
