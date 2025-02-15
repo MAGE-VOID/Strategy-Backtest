@@ -8,18 +8,20 @@ espacio_sin_separacion = "\u00A0"  # Carácter de espacio sin separación
 def mostrar_estructura(ruta, prefijo="", salida=""):
     """Muestra la estructura de directorios similar al comando tree y devuelve la cadena."""
     try:
-        elementos = [e for e in os.listdir(ruta) if e != os.path.basename(__file__)]
+        # Excluir el script actual y cualquier __pycache__
+        elementos = [e for e in os.listdir(ruta) if e not in {os.path.basename(__file__), "__pycache__"}]
         for i, elemento in enumerate(elementos):
             ruta_elemento = os.path.join(ruta, elemento)
             es_ultimo = i == len(elementos) - 1
             prefijo_actual = prefijo + ("└── " if es_ultimo else "├── ")
             salida += prefijo_actual + elemento + "\n"
-            if os.path.isdir(ruta_elemento):
+            # Solo se recurre si es directorio y no es "__pycache__"
+            if os.path.isdir(ruta_elemento) and elemento != "__pycache__":
                 prefijo_siguiente = prefijo + (
                     espacio_sin_separacion * 4
                     if es_ultimo
                     else "│" + espacio_sin_separacion * 3
-                )  # Usa espacios sin separación
+                )
                 salida = mostrar_estructura(ruta_elemento, prefijo_siguiente, salida)
         return salida
     except FileNotFoundError:
@@ -30,18 +32,26 @@ def mostrar_estructura(ruta, prefijo="", salida=""):
         return f"Error al listar el directorio {ruta}: {e}\n"
 
 
+
 def procesar_archivos(ruta_base):
-    """Procesa archivos .css, .tsx y .js y devuelve el contenido como cadena."""
+    """Procesa archivos .py y devuelve el contenido como cadena."""
     contenido_total = ""
     try:
-        for ruta_actual, _, archivos in os.walk(ruta_base):
+        for ruta_actual, dirs, archivos in os.walk(ruta_base):
+            # Evitar descender en directorios __pycache__
+            if "__pycache__" in dirs:
+                dirs.remove("__pycache__")
             for archivo in archivos:
                 if archivo.endswith((".py")) and archivo != os.path.basename(__file__):
                     ruta_completa = os.path.join(ruta_actual, archivo)
                     try:
                         with open(ruta_completa, "r", encoding="utf-8") as f:
                             contenido = f.read()
-                            contenido_total += f"Archivo: {archivo}\nRuta Completa: {ruta_completa}\nContenido:\n{contenido}\n{separador}\n"
+                            contenido_total += (
+                                f"Archivo: {archivo}\n"
+                                f"Ruta Completa: {ruta_completa}\n"
+                                f"Contenido:\n{contenido}\n{separador}\n"
+                            )
                     except FileNotFoundError:
                         print(f"Error: Archivo no encontrado: {ruta_completa}")
                     except Exception as e:
@@ -49,6 +59,7 @@ def procesar_archivos(ruta_base):
     except Exception as e:
         print(f"Error al procesar la carpeta: {e}")
     return contenido_total
+
 
 
 if __name__ == "__main__":

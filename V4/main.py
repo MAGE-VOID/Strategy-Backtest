@@ -5,6 +5,7 @@ import MetaTrader5 as mt5
 
 from data import custom as data
 from backtest.engine import BacktestEngine
+from backtest.formatters import format_statistics  # Nueva importación
 from visualization.plot import plot_equity_balance
 from strategies.signals import StrategySignal
 
@@ -35,12 +36,7 @@ result_backtest = engine.run_backtest(
     df, strategy_name="grid_buy", strategy_signal_class=StrategySignal
 )
 
-stats_df = pd.DataFrame.from_dict(
-    result_backtest["statistics"], orient="index", columns=["Value"]
-)
-stats_df["Value"] = stats_df["Value"].apply(
-    lambda x: f"{x:,.2f}" if isinstance(x, (int, float)) else x
-)
+stats_df = format_statistics(result_backtest["statistics"])
 print("\n--- Backtest Statistics ---")
 print(stats_df)
 
