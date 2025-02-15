@@ -71,16 +71,17 @@ class EntryManager:
         )
 
     def grid_buy(self, symbol, current_price, date):
+        point = self.get_symbol_points(symbol)
         long_positions = self.get_positions(symbol, "long")
         if not long_positions:
-            tp = current_price + self.tp_distance * self.get_symbol_points(symbol)
+            tp = current_price + self.tp_distance * point
             self._open_position(
                 symbol, current_price, date, is_buy=True, lot_size=self.initial_lot_size
             )
             self.update_symbol_data(symbol, current_price, tp)
         else:
             last_price = self.last_position_price[symbol]
-            grid_distance = self.grid_distance * self.get_symbol_points(symbol)
+            grid_distance = self.grid_distance * point
             if current_price <= last_price - grid_distance:
                 self._add_grid_position(symbol, current_price)
 
@@ -102,11 +103,11 @@ class EntryManager:
         if total_lots == 0:
             return
         average_price = np.dot(entry_prices, lot_sizes) / total_lots
-        new_tp = average_price + self.tp_distance * self.get_symbol_points(symbol)
+        point = self.get_symbol_points(symbol)
+        new_tp = average_price + self.tp_distance * point
         self.first_position_tp[symbol] = new_tp
         for position in positions:
             position["tp"] = new_tp
-
 
     def manage_tp_sl(self, symbol, current_price, date):
         if (
