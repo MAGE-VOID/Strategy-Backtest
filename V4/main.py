@@ -36,7 +36,7 @@ result_backtest = engine.run_backtest(
     df,
     strategy_name="grid_buy",
     strategy_signal_class=StrategySignal,
-    debug_mode="realtime",  # final / none
+    debug_mode="none",  # final / none / realtime
 )
 
 stats_df = format_statistics(result_backtest["statistics"])

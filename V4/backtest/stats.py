@@ -72,6 +72,23 @@ class Statistics:
             [trade for trade in self.closed_trades if trade.get("type") == "short"]
         )
 
+        # Calcular Value at Risk (VaR) al 95% utilizando retornos logarítmicos
+        # Esta metodología considera el crecimiento compuesto y es ampliamente utilizada en la industria.
+        confidence_level = 95
+        alpha = 100 - confidence_level  # Por ejemplo, 5 para un nivel del 95%
+        equity_values = np.array([record["equity"] for record in self.equity_over_time])
+        if len(equity_values) > 1:
+            # Calcular los retornos logarítmicos para capturar la dinámica compuesta
+            log_returns = np.diff(np.log(equity_values))
+            # Obtener el percentil inferior (cola de pérdidas) correspondiente a alpha%
+            var_log = np.percentile(log_returns, alpha)
+            # Convertir el retorno logarítmico a una pérdida porcentual simple
+            var_pct = 1 - np.exp(var_log)
+            # VaR en términos absolutos sobre el balance final
+            var_95 = final_balance * var_pct
+        else:
+            var_95 = 0.0
+
         return {
             "initial_balance": self.initial_balance,
             "final_balance": final_balance,
@@ -92,6 +109,7 @@ class Statistics:
             "avg_loss_per_trade": avg_loss_per_trade,
             "profit_std_dev": profit_std_dev,
             "ratio_gain_loss": ratio_gain_loss,
+            "var_95": var_95,
         }
 
     def _separate_profits_losses(self):
