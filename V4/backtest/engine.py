@@ -17,14 +17,16 @@ class BacktestEngine:
         self.initial_balance = initial_balance
         self.strategy_manager = None
         self.equity_over_time = []
+        self.debug_mode = "none"  # "none", "final" o "realtime"
 
     def run_backtest(
         self,
         input_data: pd.DataFrame,
         strategy_name: str = "grid_buy",
         strategy_signal_class=None,
-        debug_positions: bool = False,
+        debug_mode: str = "none",  # nuevos: "none", "final" o "realtime"
     ) -> dict:
+        self.debug_mode = debug_mode
         self._initialize_managers()
         self.equity_over_time.clear()
 
@@ -41,6 +43,8 @@ class BacktestEngine:
         symbol_lengths = {symbol: arr.shape[0] for symbol, arr in filled_data.items()}
         strategy_manager = self.strategy_manager
         total_steps = len(all_dates)
+
+        prev_trade_count = 0  # Para el modo "realtime"
 
         with tqdm(
             total=total_steps, desc="Running backtest", unit="step", ascii=True
@@ -68,7 +72,16 @@ class BacktestEngine:
                 self._update_equity(current_prices, date)
                 pbar.update(1)
 
-        if debug_positions:
+                # Si el modo es "realtime", imprime los nuevos eventos (trades) desde la última iteración
+                if self.debug_mode == "realtime":
+                    current_trade_count = len(strategy_manager.get_results())
+                    if current_trade_count > prev_trade_count:
+                        for trade in strategy_manager.get_results()[prev_trade_count:]:
+                            print(trade)
+                        prev_trade_count = current_trade_count
+
+        # Si se escogió "final", se imprimen todos los eventos al final.
+        if self.debug_mode == "final":
             self._debug_positions()
 
         statistics_calculator = Statistics(

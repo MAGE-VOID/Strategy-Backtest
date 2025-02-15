@@ -33,7 +33,10 @@ df, df_standardized = data.process_data(
 
 engine = BacktestEngine(initial_balance=1000)
 result_backtest = engine.run_backtest(
-    df, strategy_name="grid_buy", strategy_signal_class=StrategySignal
+    df,
+    strategy_name="grid_buy",
+    strategy_signal_class=StrategySignal,
+    debug_mode="realtime",  # final / none
 )
 
 stats_df = format_statistics(result_backtest["statistics"])
