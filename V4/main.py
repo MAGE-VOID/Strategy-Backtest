@@ -1,11 +1,11 @@
 # main.py
 from datetime import datetime
-import pandas as pd
 import MetaTrader5 as mt5
+import pandas as pd
 
 from data import custom as data
-from backtest.engine import BacktestEngine
-from backtest.formatters import format_statistics  # Nueva importación
+from backtest.engine import BacktestEngine, BacktestConfig
+from backtest.formatters import format_statistics
 from visualization.plot import plot_equity_balance
 from strategies.signals import StrategySignal
 
@@ -31,13 +31,16 @@ df, df_standardized = data.process_data(
     inp_start_date, inp_end_date, symbols, timeframe
 )
 
-engine = BacktestEngine(initial_balance=1000)
-result_backtest = engine.run_backtest(
-    df,
+# Crear la configuración del backtest
+config = BacktestConfig(
+    initial_balance=1000,
     strategy_name="grid_buy",
     strategy_signal_class=StrategySignal,
-    debug_mode="none",  # final / none / realtime
+    debug_mode="none",  # opciones: "none", "final", "realtime"
 )
+
+engine = BacktestEngine(config)
+result_backtest = engine.run_backtest(df)
 
 stats_df = format_statistics(result_backtest["statistics"])
 print("\n--- Backtest Statistics ---")

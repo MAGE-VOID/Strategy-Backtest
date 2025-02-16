@@ -58,7 +58,8 @@ def connect_and_login_mt5(account, server, password, print_info=False):
 def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataFrame:
     """
     Descarga y prepara los datos de un símbolo desde MetaTrader 5.
-    Retorna un DataFrame con columnas: [Symbol, Open, High, Low, Close, Volume].
+    Retorna un DataFrame con columnas: [Symbol, Open, High, Low, Close, Volume],
+    además de 'Point' y 'Tick_Value' correspondientes al símbolo.
     """
     rates = mt5.copy_rates_range(symbol, timeframe, start_date, end_date)
     if rates is None or len(rates) == 0:
@@ -82,6 +83,16 @@ def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataF
     df.set_index("date", inplace=True)
     df = df[["Open", "High", "Low", "Close", "Volume"]].astype("float64")
     df.insert(0, "Symbol", symbol)
+
+    # Obtener información del símbolo para agregar 'Point' y 'Tick_Value'
+    symbol_info = mt5.symbol_info(symbol)
+    if symbol_info is not None:
+        df["Point"] = symbol_info.point
+        df["Tick_Value"] = symbol_info.trade_tick_value
+    else:
+        df["Point"] = None
+        df["Tick_Value"] = None
+
     return df
 
 
