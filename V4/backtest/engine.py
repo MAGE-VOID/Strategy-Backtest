@@ -6,30 +6,12 @@ from tqdm import tqdm
 
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
-
-
-class BacktestConfig:
-    """
-    Objeto de configuración para el backtest.
-    Permite centralizar parámetros como balance inicial, estrategia, modo debug, etc.
-    """
-
-    def __init__(
-        self,
-        initial_balance=1000,
-        strategy_name="grid_buy",
-        strategy_signal_class=None,
-        debug_mode="none",
-    ):
-        self.initial_balance = initial_balance
-        self.strategy_name = strategy_name
-        self.strategy_signal_class = strategy_signal_class
-        self.debug_mode = debug_mode  # opciones: "none", "final", "realtime"
+from backtest.config import BacktestConfig  # NUEVA IMPORTACIÓN
 
 
 class BacktestEngine:
     """
-    Clase que gestiona la ejecución del backtest utilizando un objeto de configuración.
+    Motor del backtest que utiliza un objeto de configuración para centralizar parámetros.
     """
 
     def __init__(self, config: BacktestConfig):
@@ -38,10 +20,10 @@ class BacktestEngine:
         self.equity_over_time = []
 
     def run_backtest(self, input_data: pd.DataFrame) -> dict:
-        # Preprocesar datos (ordenarlos, etc.)
+        # Preprocesar y ordenar datos
         input_data = self._preprocess_data(input_data)
 
-        # Construir el diccionario de puntos a partir del DataFrame
+        # Construir el diccionario de puntos (se asume que 'Point' ya está en el DataFrame)
         symbol_points_mapping = self._build_symbol_points_mapping(input_data)
         self._init_managers(symbol_points_mapping)
         self.equity_over_time.clear()
@@ -76,7 +58,6 @@ class BacktestEngine:
                 continue
 
             for symbol, price in current_prices.items():
-                # Generar señales para el símbolo actual
                 signal_buy, signal_sell = signals[symbol].generate_signals_for_candle(i)
                 self.strategy_manager.manage_tp_sl(symbol, price, date)
                 self.strategy_manager.apply_strategy(
@@ -91,7 +72,6 @@ class BacktestEngine:
 
             self._update_equity(current_prices, date)
 
-            # Modo realtime: mostrar nuevas operaciones en cada iteración
             if self.config.debug_mode == "realtime":
                 current_trade_count = len(self.strategy_manager.get_results())
                 if current_trade_count > prev_trade_count:
@@ -99,11 +79,9 @@ class BacktestEngine:
                         print(trade)
                     prev_trade_count = current_trade_count
 
-        # Modo final: mostrar todas las operaciones al final
         if self.config.debug_mode == "final":
             self._debug_positions()
 
-        # Calcular estadísticas finales
         statistics_calculator = Statistics(
             self.strategy_manager.get_results(),
             self.equity_over_time,
@@ -118,19 +96,13 @@ class BacktestEngine:
         }
 
     def _build_symbol_points_mapping(self, input_data: pd.DataFrame) -> dict:
-        """
-        Construye un diccionario de la forma { 'símbolo': point } a partir del DataFrame.
-        Se asume que la columna "Point" ya fue agregada en el proceso de descarga.
-        """
+        """Construye { 'símbolo': point } a partir del DataFrame."""
         return {
             symbol: group["Point"].iloc[0]
             for symbol, group in input_data.groupby("Symbol")
         }
 
     def _init_managers(self, symbol_points_mapping: dict):
-        """
-        Inicializa los managers inyectando el diccionario de puntos.
-        """
         self.strategy_manager = EntryManager(
             self.config.initial_balance, symbol_points_mapping=symbol_points_mapping
         )
@@ -140,9 +112,6 @@ class BacktestEngine:
         return input_data
 
     def _prepare_data(self, input_data: pd.DataFrame, strategy_signal_class):
-        """
-        Agrupa los datos por símbolo y crea un generador de señales para cada uno.
-        """
         all_dates = input_data.index.unique()
         grouped_data = input_data.groupby("Symbol")
         filled_data = {}
@@ -156,9 +125,6 @@ class BacktestEngine:
         return all_dates, filled_data, signal_generators
 
     def _update_equity(self, current_prices: dict, date: datetime):
-        """
-        Calcula la equidad actual y la agrega al registro de evolución.
-        """
         equity = self._calculate_equity(current_prices)
         self.equity_over_time.append(
             {
