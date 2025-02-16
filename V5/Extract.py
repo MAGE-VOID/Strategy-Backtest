@@ -14,7 +14,7 @@ def get_ignore_files(extra_files=None):
     :param extra_files: Iterable con nombres adicionales a ignorar.
     :return: Conjunto con los nombres de archivos a ignorar.
     """
-    base_files = {os.path.basename(__file__), "signals_2.py"}
+    base_files = {os.path.basename(__file__), "signals_2.py", "test.py"}
     if extra_files:
         base_files.update(extra_files)
     return base_files

@@ -2,11 +2,10 @@
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from tqdm import tqdm
-
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.config import BacktestConfig
+from backtest.counter import create_progress_counter
 
 
 class BacktestEngine:
@@ -31,65 +30,40 @@ class BacktestEngine:
         if signals is None:
             raise ValueError("No se proporcionó una clase para generar señales.")
 
-        symbol_lengths = {symbol: arr.shape[0] for symbol, arr in filled_data.items()}
         total_steps = len(all_dates)
-        prev_trade_count = 0
 
-        # Usar un desc y position distinto según el modo
         if self.config.mode == "single":
-            iterator = tqdm(
-                all_dates,
-                total=total_steps,
-                desc="Running backtest",
-                unit="step",
-                ascii=True,
-                leave=True,
-            )
+            counter = create_progress_counter(self.config.mode, total_steps)
         else:
-            iterator = tqdm(
-                all_dates,
-                total=total_steps,
-                desc=f"Nucleo {worker_id}",
-                unit="step",
-                ascii=True,
-                position=worker_id,  # Asigna una posición distinta para cada worker
-                leave=False,  # Al terminar, la barra se borra (o se reinicia)
+            counter = create_progress_counter(self.config.mode, total_steps, worker_id)
+
+        for i, date in enumerate(all_dates):
+            for symbol, arr in filled_data.items():
+                if i < arr.shape[0]:
+                    price = arr[i]
+                    signal_buy, signal_sell = signals[
+                        symbol
+                    ].generate_signals_for_candle(i)
+                    self.strategy_manager.manage_tp_sl(symbol, price, date)
+                    self.strategy_manager.apply_strategy(
+                        self.config.strategy_name,
+                        symbol,
+                        signal_buy,
+                        signal_sell,
+                        price,
+                        i,
+                        date,
+                    )
+            self._update_equity(
+                {
+                    symbol: arr[i]
+                    for symbol, arr in filled_data.items()
+                    if i < arr.shape[0]
+                },
+                date,
             )
-
-        # Bucle principal del backtest
-        for i, date in enumerate(iterator):
-            current_prices = {
-                symbol: arr[i]
-                for symbol, arr in filled_data.items()
-                if i < symbol_lengths[symbol]
-            }
-            if not current_prices:
-                continue
-
-            for symbol, price in current_prices.items():
-                signal_buy, signal_sell = signals[symbol].generate_signals_for_candle(i)
-                self.strategy_manager.manage_tp_sl(symbol, price, date)
-                self.strategy_manager.apply_strategy(
-                    self.config.strategy_name,
-                    symbol,
-                    signal_buy,
-                    signal_sell,
-                    price,
-                    i,
-                    date,
-                )
-
-            self._update_equity(current_prices, date)
-
-            if self.config.debug_mode == "realtime":
-                current_trade_count = len(self.strategy_manager.get_results())
-                if current_trade_count > prev_trade_count:
-                    for trade in self.strategy_manager.get_results()[prev_trade_count:]:
-                        print(trade)
-                    prev_trade_count = current_trade_count
-
-        if self.config.debug_mode == "final":
-            self._debug_positions()
+            counter.update(1)
+        counter.close()
 
         statistics_calculator = Statistics(
             self.strategy_manager.get_results(),
@@ -128,10 +102,10 @@ class BacktestEngine:
         for symbol, group in grouped_data:
             filled_data[symbol] = group["Open"].values
             if strategy_signal_class:
+                optimization_params = getattr(self.config, "optimization_params", {})
                 signal_generators[symbol] = strategy_signal_class(
-                    group, optimization_params=self.config.optimization_params
+                    group, optimization_params=optimization_params
                 )
-
         return all_dates, filled_data, signal_generators
 
     def _update_equity(self, current_prices: dict, date: datetime):

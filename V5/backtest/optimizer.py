@@ -38,9 +38,6 @@ def generate_param_combinations(opt_params: dict):
 
 
 def run_trial(trial_params, base_config, input_data, worker_id):
-    """
-    Ejecuta un backtest con una combinación específica de parámetros.
-    """
     config_trial = copy.deepcopy(base_config)
     config_trial.optimization_params = trial_params
     engine = BacktestEngine(config_trial)
