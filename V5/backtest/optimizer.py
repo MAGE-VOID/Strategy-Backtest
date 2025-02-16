@@ -37,26 +37,19 @@ def generate_param_combinations(opt_params: dict):
     return combinations
 
 
-def run_trial(trial_params, base_config, input_data):
+def run_trial(trial_params, base_config, input_data, worker_id):
     """
     Ejecuta un backtest con una combinación específica de parámetros.
-    Se crea una copia de la configuración base y se reemplaza 'optimization_params'.
-    NOTA: 'input_data' es el DataFrame obtenido en el proceso principal.
     """
     config_trial = copy.deepcopy(base_config)
     config_trial.optimization_params = trial_params
     engine = BacktestEngine(config_trial)
-    result = engine.run_backtest(input_data)
+    result = engine.run_backtest(input_data, worker_id=worker_id)
     result["optimization_params"] = trial_params
     return result
 
 
 def run_optimization(base_config, input_data, max_workers=None):
-    """
-    Ejecuta la optimización de parámetros en paralelo.
-    Se generan todas las combinaciones y se ejecuta un backtest para cada una en paralelo.
-    Se retorna el mejor resultado (según 'net_profit') y la lista completa de resultados.
-    """
     opt_params = getattr(base_config, "optimization_params", None)
     if not opt_params:
         opt_params = base_config.strategy_signal_class.default_optimization_params
@@ -66,11 +59,11 @@ def run_optimization(base_config, input_data, max_workers=None):
 
     results = []
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Asignar un worker_id distinto a cada combinación, iniciando en 1
         futures = [
-            executor.submit(run_trial, params, base_config, input_data)
-            for params in param_combinations
+            executor.submit(run_trial, params, base_config, input_data, worker_id)
+            for worker_id, params in enumerate(param_combinations, start=1)
         ]
-        # Se recorre as_completed sin tqdm aquí
         for future in as_completed(futures):
             try:
                 result = future.result()

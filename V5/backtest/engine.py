@@ -19,9 +19,8 @@ class BacktestEngine:
         self.strategy_manager = None
         self.equity_over_time = []
 
-    def run_backtest(self, input_data: pd.DataFrame) -> dict:
+    def run_backtest(self, input_data: pd.DataFrame, worker_id: int = 1) -> dict:
         input_data = self._preprocess_data(input_data)
-
         symbol_points_mapping = self._build_symbol_points_mapping(input_data)
         self._init_managers(symbol_points_mapping)
         self.equity_over_time.clear()
@@ -36,7 +35,7 @@ class BacktestEngine:
         total_steps = len(all_dates)
         prev_trade_count = 0
 
-        # Usar tqdm siempre, pero con descripción según el modo:
+        # Usar un desc y position distinto según el modo
         if self.config.mode == "single":
             iterator = tqdm(
                 all_dates,
@@ -44,14 +43,17 @@ class BacktestEngine:
                 desc="Running backtest",
                 unit="step",
                 ascii=True,
+                leave=True,
             )
         else:
             iterator = tqdm(
                 all_dates,
                 total=total_steps,
-                desc="Worker backtest",
+                desc=f"Nucleo {worker_id}",
                 unit="step",
                 ascii=True,
+                position=worker_id,  # Asigna una posición distinta para cada worker
+                leave=False,  # Al terminar, la barra se borra (o se reinicia)
             )
 
         # Bucle principal del backtest
