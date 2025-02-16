@@ -36,16 +36,26 @@ class BacktestEngine:
         total_steps = len(all_dates)
         prev_trade_count = 0
 
-        # Bucle principal del backtest
-        for i, date in enumerate(
-            tqdm(
+        # Usar tqdm siempre, pero con descripción según el modo:
+        if self.config.mode == "single":
+            iterator = tqdm(
                 all_dates,
                 total=total_steps,
                 desc="Running backtest",
                 unit="step",
                 ascii=True,
             )
-        ):
+        else:
+            iterator = tqdm(
+                all_dates,
+                total=total_steps,
+                desc="Worker backtest",
+                unit="step",
+                ascii=True,
+            )
+
+        # Bucle principal del backtest
+        for i, date in enumerate(iterator):
             current_prices = {
                 symbol: arr[i]
                 for symbol, arr in filled_data.items()
@@ -93,7 +103,6 @@ class BacktestEngine:
         }
 
     def _build_symbol_points_mapping(self, input_data: pd.DataFrame) -> dict:
-        """Construye { 'símbolo': point } a partir del DataFrame."""
         return {
             symbol: group["Point"].iloc[0]
             for symbol, group in input_data.groupby("Symbol")
@@ -117,7 +126,9 @@ class BacktestEngine:
         for symbol, group in grouped_data:
             filled_data[symbol] = group["Open"].values
             if strategy_signal_class:
-                signal_generators[symbol] = strategy_signal_class(group)
+                signal_generators[symbol] = strategy_signal_class(
+                    group, optimization_params=self.config.optimization_params
+                )
 
         return all_dates, filled_data, signal_generators
 
