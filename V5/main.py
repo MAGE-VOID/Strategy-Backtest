@@ -2,14 +2,16 @@
 from datetime import datetime
 import MetaTrader5 as mt5
 import pandas as pd
-
 from data import custom as data
 from backtest.engine import BacktestEngine, BacktestConfig
 from backtest.formatters import format_statistics
 from visualization.plot import plot_equity_balance
 from strategies.signals import StrategySignal
+import multiprocessing
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
+
     # Conexión a MT5 y obtención de datos (se realiza solo una vez)
     data.connect_and_login_mt5(51344621, "ICMarketsSC-Demo", "bCFNLB9k")
 

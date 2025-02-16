@@ -18,7 +18,7 @@ class BacktestEngine:
         self.strategy_manager = None
         self.equity_over_time = []
 
-    def run_backtest(self, input_data: pd.DataFrame, worker_id: int = 1) -> dict:
+    def run_backtest(self, input_data: pd.DataFrame, worker_id) -> dict:
         input_data = self._preprocess_data(input_data)
         symbol_points_mapping = self._build_symbol_points_mapping(input_data)
         self._init_managers(symbol_points_mapping)

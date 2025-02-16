@@ -57,10 +57,11 @@ def run_optimization(base_config, input_data, max_workers=None):
     results = []
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         # Asignar un worker_id distinto a cada combinación, iniciando en 1
-        futures = [
-            executor.submit(run_trial, params, base_config, input_data, worker_id)
-            for worker_id, params in enumerate(param_combinations, start=1)
-        ]
+        futures = []
+        for idx, params in enumerate(param_combinations):
+            # idx empieza en 0, con lo cual position será idx
+            future = executor.submit(run_trial, params, base_config, input_data, worker_id=idx)
+            futures.append(future)
         for future in as_completed(futures):
             try:
                 result = future.result()
