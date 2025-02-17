@@ -2,10 +2,14 @@
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from tqdm import tqdm
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
-from backtest.config import BacktestConfig  # NUEVA IMPORTACIÓN
+from backtest.config import BacktestConfig
+from barprogress import (
+    init_progress_bar,
+    update_progress_bar,
+    stop_progress_bar,
+)  # <-- Importa stop_progress_bar
 
 
 class BacktestEngine:
@@ -38,16 +42,12 @@ class BacktestEngine:
         total_steps = len(all_dates)
         prev_trade_count = 0
 
+        # Inicializar la barra de progreso una sola vez antes del bucle
+        init_progress_bar(total_steps)
+        progress_current = 0
+
         # Bucle principal del backtest
-        for i, date in enumerate(
-            tqdm(
-                all_dates,
-                total=total_steps,
-                desc="Running backtest",
-                unit="step",
-                ascii=True,
-            )
-        ):
+        for i, date in enumerate(all_dates):
             current_prices = {
                 symbol: arr[i]
                 for symbol, arr in filled_data.items()
@@ -77,6 +77,13 @@ class BacktestEngine:
                     for trade in self.strategy_manager.get_results()[prev_trade_count:]:
                         print(trade)
                     prev_trade_count = current_trade_count
+
+            # Actualizar la barra de progreso
+            progress_current += 1
+            update_progress_bar(progress_current)
+
+        # Al finalizar el bucle, nos aseguramos de detener la barra de progreso
+        stop_progress_bar()
 
         if self.config.debug_mode == "final":
             self._debug_positions()
