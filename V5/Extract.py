@@ -7,10 +7,11 @@ import subprocess
 SEPARADOR = "=" * 50
 ESPACIO_SIN_SEPARACION = "\u00A0"  # Carácter de espacio sin separación
 
+
 def get_ignore_files(extra_files=None):
     """
     Retorna un conjunto con los nombres de archivos a ignorar.
-    
+
     :param extra_files: Iterable con nombres adicionales a ignorar.
     :return: Conjunto con los nombres de archivos a ignorar.
     """
@@ -19,10 +20,11 @@ def get_ignore_files(extra_files=None):
         base_files.update(extra_files)
     return base_files
 
+
 def get_ignore_dirs(extra_dirs=None):
     """
     Retorna un conjunto con los nombres de directorios a ignorar.
-    
+
     :param extra_dirs: Iterable con nombres adicionales a ignorar.
     :return: Conjunto con los nombres de directorios a ignorar.
     """
@@ -31,11 +33,12 @@ def get_ignore_dirs(extra_dirs=None):
         base_dirs.update(extra_dirs)
     return base_dirs
 
+
 def mostrar_estructura(ruta, ignore_files, ignore_dirs, prefijo=""):
     """
     Genera una cadena que representa la estructura del directorio, similar al comando 'tree'.
     Se ignoran los archivos y directorios indicados.
-    
+
     :param ruta: Ruta del directorio a explorar.
     :param ignore_files: Conjunto de nombres de archivos a ignorar.
     :param ignore_dirs: Conjunto de nombres de directorios a ignorar.
@@ -58,16 +61,21 @@ def mostrar_estructura(ruta, ignore_files, ignore_dirs, prefijo=""):
         elementos.sort()
         for i, elemento in enumerate(elementos):
             ruta_elemento = os.path.join(ruta, elemento)
-            es_ultimo = (i == len(elementos) - 1)
+            es_ultimo = i == len(elementos) - 1
             rama = "└── " if es_ultimo else "├── "
             salida += f"{prefijo}{rama}{elemento}\n"
             # Si es directorio y no se ignora, se recorre recursivamente
             if os.path.isdir(ruta_elemento):
                 if elemento in ignore_dirs:
                     continue
-                nuevo_prefijo = (prefijo + (ESPACIO_SIN_SEPARACION * 4)
-                                  if es_ultimo else prefijo + "│" + ESPACIO_SIN_SEPARACION * 3)
-                salida += mostrar_estructura(ruta_elemento, ignore_files, ignore_dirs, nuevo_prefijo)
+                nuevo_prefijo = (
+                    prefijo + (ESPACIO_SIN_SEPARACION * 4)
+                    if es_ultimo
+                    else prefijo + "│" + ESPACIO_SIN_SEPARACION * 3
+                )
+                salida += mostrar_estructura(
+                    ruta_elemento, ignore_files, ignore_dirs, nuevo_prefijo
+                )
     except FileNotFoundError:
         salida += f"Error: Ruta no encontrada: {ruta}\n"
     except PermissionError:
@@ -76,11 +84,12 @@ def mostrar_estructura(ruta, ignore_files, ignore_dirs, prefijo=""):
         salida += f"Error al listar el directorio {ruta}: {e}\n"
     return salida
 
+
 def procesar_archivos(ruta_base, ignore_files, ignore_dirs, extension=".py"):
     """
     Procesa archivos con la extensión especificada dentro de la ruta base,
     ignorando archivos y directorios indicados, y retorna su contenido.
-    
+
     :param ruta_base: Ruta base para la búsqueda.
     :param ignore_files: Conjunto de nombres de archivos a ignorar.
     :param ignore_dirs: Conjunto de nombres de directorios a ignorar.
@@ -103,16 +112,23 @@ def procesar_archivos(ruta_base, ignore_files, ignore_dirs, extension=".py"):
                         f"Contenido:\n{contenido}\n{SEPARADOR}\n"
                     )
                 except FileNotFoundError:
-                    print(f"Error: Archivo no encontrado: {ruta_completa}", file=sys.stderr)
+                    print(
+                        f"Error: Archivo no encontrado: {ruta_completa}",
+                        file=sys.stderr,
+                    )
                 except Exception as e:
-                    print(f"Error al leer el archivo {ruta_completa}: {e}", file=sys.stderr)
+                    print(
+                        f"Error al leer el archivo {ruta_completa}: {e}",
+                        file=sys.stderr,
+                    )
     return contenido_total
+
 
 def copy_to_clipboard(texto):
     """
     Intenta copiar el texto dado al portapapeles utilizando pyperclip;
     si falla, se intenta con el comando 'pbcopy' (macOS).
-    
+
     :param texto: Texto a copiar al portapapeles.
     :return: True si la copia fue exitosa, False en caso contrario.
     """
@@ -126,11 +142,16 @@ def copy_to_clipboard(texto):
         except (FileNotFoundError, subprocess.CalledProcessError):
             return False
 
+
 def main():
     # Configuración de elementos a ignorar
-    ignore_files = get_ignore_files()          # Archivos a ignorar (por defecto: el script actual y "signals_2.py")
-    ignore_dirs = get_ignore_dirs()            # Directorios a ignorar (por defecto: "__pycache__")
-    
+    ignore_files = (
+        get_ignore_files()
+    )  # Archivos a ignorar (por defecto: el script actual y "signals_2.py")
+    ignore_dirs = (
+        get_ignore_dirs()
+    )  # Directorios a ignorar (por defecto: "__pycache__")
+
     # Se determina la ruta actual del script
     ruta_script = os.path.abspath(__file__)
     ruta_actual = os.path.dirname(ruta_script)
@@ -138,12 +159,16 @@ def main():
 
     # Se genera la estructura de directorios y se procesan los archivos con extensión ".py"
     estructura = mostrar_estructura(ruta_actual, ignore_files, ignore_dirs)
-    contenido_archivos = procesar_archivos(ruta_actual, ignore_files, ignore_dirs, extension=".py")
+    contenido_archivos = procesar_archivos(
+        ruta_actual, ignore_files, ignore_dirs, extension=".py"
+    )
     contenido_completo = f"{estructura}{SEPARADOR}\n{contenido_archivos}"
 
     # Se intenta copiar la información al portapapeles
     if copy_to_clipboard(contenido_completo):
-        print("La estructura del directorio y el contenido de los archivos han sido copiados al portapapeles.")
+        print(
+            "La estructura del directorio y el contenido de los archivos han sido copiados al portapapeles."
+        )
     else:
         print("Error: No se pudo copiar al portapapeles.")
 
@@ -151,6 +176,7 @@ def main():
     print(SEPARADOR)
     print(estructura, end="")
     print(SEPARADOR)
+
 
 if __name__ == "__main__":
     main()
