@@ -8,7 +8,6 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-# Variables globales para el progreso
 progress = None
 task_id = None
 

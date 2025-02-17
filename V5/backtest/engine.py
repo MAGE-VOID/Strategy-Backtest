@@ -5,11 +5,7 @@ from datetime import datetime
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.config import BacktestConfig
-from barprogress import (
-    init_progress_bar,
-    update_progress_bar,
-    stop_progress_bar,
-)  # <-- Importa stop_progress_bar
+from barprogress import init_progress_bar, update_progress_bar, stop_progress_bar
 
 
 class BacktestEngine:
@@ -23,15 +19,12 @@ class BacktestEngine:
         self.equity_over_time = []
 
     def run_backtest(self, input_data: pd.DataFrame) -> dict:
-        # Preprocesar y ordenar datos
         input_data = self._preprocess_data(input_data)
 
-        # Construir el diccionario de puntos (se asume que 'Point' ya está en el DataFrame)
         symbol_points_mapping = self._build_symbol_points_mapping(input_data)
         self._init_managers(symbol_points_mapping)
         self.equity_over_time.clear()
 
-        # Preparar datos y señales
         all_dates, filled_data, signals = self._prepare_data(
             input_data, self.config.strategy_signal_class
         )
@@ -42,7 +35,6 @@ class BacktestEngine:
         total_steps = len(all_dates)
         prev_trade_count = 0
 
-        # Inicializar la barra de progreso una sola vez antes del bucle
         init_progress_bar(total_steps)
         progress_current = 0
 
@@ -78,11 +70,9 @@ class BacktestEngine:
                         print(trade)
                     prev_trade_count = current_trade_count
 
-            # Actualizar la barra de progreso
             progress_current += 1
             update_progress_bar(progress_current)
 
-        # Al finalizar el bucle, nos aseguramos de detener la barra de progreso
         stop_progress_bar()
 
         if self.config.debug_mode == "final":
