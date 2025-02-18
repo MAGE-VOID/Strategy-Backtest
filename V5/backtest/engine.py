@@ -5,7 +5,7 @@ from datetime import datetime
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.config import BacktestConfig
-from backtest.barprogress import BarProgress
+from backtest.progress import BarProgress
 
 
 class BacktestEngine:

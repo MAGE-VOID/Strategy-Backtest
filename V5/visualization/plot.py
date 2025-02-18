@@ -1,6 +1,8 @@
 # visualization/plot.py
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('TkAgg')
 
 def plot_equity_balance(result_backtest: dict):
     equity_data = pd.DataFrame(result_backtest["equity_over_time"])
