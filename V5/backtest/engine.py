@@ -5,7 +5,8 @@ from datetime import datetime
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.config import BacktestConfig
-from barprogress import init_progress_bar, update_progress_bar, stop_progress_bar
+from backtest.formatters import format_statistics
+from backtest.barprogress import BarProgress
 
 
 class BacktestEngine:
@@ -35,7 +36,7 @@ class BacktestEngine:
         total_steps = len(all_dates)
         prev_trade_count = 0
 
-        init_progress_bar(total_steps)
+        progress_bar = BarProgress(total_steps)
         progress_current = 0
 
         # Bucle principal del backtest
@@ -64,16 +65,17 @@ class BacktestEngine:
             self._update_equity(current_prices, date)
 
             if self.config.debug_mode == "realtime":
-                current_trade_count = len(self.strategy_manager.get_results())
+                results = self.strategy_manager.get_results()
+                current_trade_count = len(results)
                 if current_trade_count > prev_trade_count:
-                    for trade in self.strategy_manager.get_results()[prev_trade_count:]:
+                    for trade in results[prev_trade_count:]:
                         print(trade)
                     prev_trade_count = current_trade_count
 
             progress_current += 1
-            update_progress_bar(progress_current)
+            progress_bar.update(progress_current + 1)
 
-        stop_progress_bar()
+        progress_bar.stop()
 
         if self.config.debug_mode == "final":
             self._debug_positions()
@@ -122,35 +124,40 @@ class BacktestEngine:
         return all_dates, filled_data, signal_generators
 
     def _update_equity(self, current_prices: dict, date: datetime):
-        equity = self._calculate_equity(current_prices)
+        positions = self.strategy_manager.get_positions()
+        balance = self.strategy_manager.get_balance()
+        equity = self._calculate_equity(positions, current_prices, balance)
+
         self.equity_over_time.append(
             {
                 "date": date,
                 "equity": equity,
-                "balance": self.strategy_manager.get_balance(),
+                "balance": balance,
             }
         )
 
-    def _calculate_equity(self, current_prices: dict) -> float:
-        equity = self.strategy_manager.get_balance()
-        positions = self.strategy_manager.get_positions()
-        symbol_points_map = (
-            self.strategy_manager.symbol_points_mapping
-        )  # Para fácil acceso
+    def _calculate_equity(
+        self, positions: dict, current_prices: dict, balance: float
+    ) -> float:
+        symbol_points_map = self.strategy_manager.symbol_points_mapping
+        equity = balance
 
         for pos in positions.values():
             symbol = pos["symbol"]
-            cp = current_prices.get(symbol, 0)  # current_price
-            if cp:
-                point = symbol_points_map[symbol]["point"]
-                tick_value = symbol_points_map[symbol]["tick_value"]
-                if pos["position"] == "long":
-                    price_diff = cp - pos["entry_price"]
-                else:  # short
-                    price_diff = pos["entry_price"] - cp
+            cp = current_prices.get(symbol, 0)
+            if cp == 0:
+                continue
 
-                floating_profit = (price_diff / point) * tick_value * pos["lot_size"]
-                equity += floating_profit
+            point = symbol_points_map[symbol]["point"]
+            tick_value = symbol_points_map[symbol]["tick_value"]
+
+            if pos["position"] == "long":
+                price_diff = cp - pos["entry_price"]
+            else:
+                price_diff = pos["entry_price"] - cp
+
+            floating_profit = (price_diff / point) * tick_value * pos["lot_size"]
+            equity += floating_profit
 
         return equity
 
