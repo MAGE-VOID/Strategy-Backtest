@@ -124,21 +124,9 @@ class Statistics:
         return profits, losses
 
     def _calculate_drawdowns(self):
-        equity_values = [record["equity"] for record in self.equity_over_time]
-
-        max_equity = equity_values[0]
-        max_drawdown_abs = 0
-        max_drawdown_pct = 0
-
-        for equity in equity_values:
-            if equity > max_equity:
-                max_equity = equity
-            drawdown_abs = max_equity - equity
-            drawdown_pct = drawdown_abs / max_equity if max_equity > 0 else 0
-
-            if drawdown_abs > max_drawdown_abs:
-                max_drawdown_abs = drawdown_abs
-            if drawdown_pct > max_drawdown_pct:
-                max_drawdown_pct = drawdown_pct
-
-        return max_drawdown_abs, max_drawdown_pct * 100
+        equity_array = np.array([record["equity"] for record in self.equity_over_time])
+        cum_max = np.maximum.accumulate(equity_array)
+        drawdowns = cum_max - equity_array
+        max_drawdown_abs = drawdowns.max()
+        max_drawdown_pct = (drawdowns / cum_max).max() * 100
+        return max_drawdown_abs, max_drawdown_pct

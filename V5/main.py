@@ -1,7 +1,6 @@
 # main.py
 from datetime import datetime
 import MetaTrader5 as mt5
-import pandas as pd
 from data import custom as data
 from backtest.engine import BacktestEngine, BacktestConfig
 from backtest.formatters import format_statistics
