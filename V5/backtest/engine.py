@@ -92,36 +92,16 @@ class BacktestEngine:
         }
 
     def _build_symbol_points_mapping(self, input_data: pd.DataFrame) -> dict:
-        """
-        Construye un diccionario que mapea cada símbolo a sus valores de point y tick_value.
-        Ejemplo:
-            {
-                'EURUSD': {
-                    'point': 1e-5,
-                    'tick_value': 1.0
-                },
-                'GBPUSD': {
-                    'point': 1e-5,
-                    'tick_value': 1.2
-                },
-                ...
-            }
-        """
         symbol_mapping = {}
         for symbol, group in input_data.groupby("Symbol"):
             point = group["Point"].iloc[0]
-            tick_value = group["Tick_Value"].iloc[0]  # <-- Asegúrate de haberlo descargado
-            symbol_mapping[symbol] = {
-                "point": point,
-                "tick_value": tick_value
-            }
+            tick_value = group["Tick_Value"].iloc[0]
+            symbol_mapping[symbol] = {"point": point, "tick_value": tick_value}
         return symbol_mapping
-
 
     def _init_managers(self, symbol_points_mapping: dict):
         self.strategy_manager = EntryManager(
-            self.config.initial_balance,
-            symbol_points_mapping=symbol_points_mapping
+            self.config.initial_balance, symbol_points_mapping=symbol_points_mapping
         )
 
     def _preprocess_data(self, input_data: pd.DataFrame) -> pd.DataFrame:
@@ -154,7 +134,9 @@ class BacktestEngine:
     def _calculate_equity(self, current_prices: dict) -> float:
         equity = self.strategy_manager.get_balance()
         positions = self.strategy_manager.get_positions()
-        symbol_points_map = self.strategy_manager.symbol_points_mapping  # Para fácil acceso
+        symbol_points_map = (
+            self.strategy_manager.symbol_points_mapping
+        )  # Para fácil acceso
 
         for pos in positions.values():
             symbol = pos["symbol"]
