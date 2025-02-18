@@ -1,3 +1,4 @@
+# backtest/stats.py
 import numpy as np
 
 
@@ -73,18 +74,15 @@ class Statistics:
         )
 
         # Calcular Value at Risk (VaR) al 95% utilizando retornos logarítmicos
-        # Esta metodología considera el crecimiento compuesto y es ampliamente utilizada en la industria.
         confidence_level = 95
         alpha = 100 - confidence_level  # Por ejemplo, 5 para un nivel del 95%
         equity_values = np.array([record["equity"] for record in self.equity_over_time])
         if len(equity_values) > 1:
-            # Calcular los retornos logarítmicos para capturar la dinámica compuesta
-            log_returns = np.diff(np.log(equity_values))
-            # Obtener el percentil inferior (cola de pérdidas) correspondiente a alpha%
+            # Evitar valores <= 0 para el cálculo del logaritmo
+            safe_equity = np.clip(equity_values, 1e-6, None)
+            log_returns = np.diff(np.log(safe_equity))
             var_log = np.percentile(log_returns, alpha)
-            # Convertir el retorno logarítmico a una pérdida porcentual simple
             var_pct = 1 - np.exp(var_log)
-            # VaR en términos absolutos sobre el balance final
             var_95 = final_balance * var_pct
         else:
             var_95 = 0.0
@@ -113,7 +111,6 @@ class Statistics:
         }
 
     def _separate_profits_losses(self):
-        """Helper method to separate profits and losses from closed trades."""
         profits = [
             trade.get("profit", 0)
             for trade in self.closed_trades
@@ -127,7 +124,6 @@ class Statistics:
         return profits, losses
 
     def _calculate_drawdowns(self):
-        """Helper method to calculate maximal and relative drawdowns."""
         equity_values = [record["equity"] for record in self.equity_over_time]
 
         max_equity = equity_values[0]

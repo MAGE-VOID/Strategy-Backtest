@@ -3,12 +3,13 @@ import numpy as np
 
 
 class PositionManager:
-    def __init__(self, balance):
+    def __init__(self, balance, symbol_points_mapping=None):
         self.positions = {}
         self.balance = balance
         self.ticket_counter = 0
         self.global_counter = 0
         self.results = []
+        self.symbol_points_mapping = symbol_points_mapping or {}
 
     def open_position(
         self, symbol, position_type, price, lot_size, sl=None, tp=None, open_date=None
@@ -52,11 +53,19 @@ class PositionManager:
         if position is None:
             return
 
-        profit = (
-            (current_price - position["entry_price"]) * position["lot_size"]
-            if position["position"] == "long"
-            else (position["entry_price"] - current_price) * position["lot_size"]
-        )
+        symbol = position["symbol"]
+        # Obtenemos el point y el tick_value
+        point = self.symbol_points_mapping[symbol]["point"]
+        tick_value = self.symbol_points_mapping[symbol]["tick_value"]
+
+        if position["position"] == "long":
+            price_diff = current_price - position["entry_price"]
+        else:  # short
+            price_diff = position["entry_price"] - current_price
+
+        # Cálculo de profit en USD
+        profit = (price_diff / point) * tick_value * position["lot_size"]
+
         self.balance += profit
 
         self.results.append(

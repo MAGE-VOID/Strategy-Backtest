@@ -58,8 +58,7 @@ def connect_and_login_mt5(account, server, password, print_info=False):
 def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataFrame:
     """
     Descarga y prepara los datos de un símbolo desde MetaTrader 5.
-    Retorna un DataFrame con columnas: [Symbol, Open, High, Low, Close, Volume],
-    además de 'Point' y 'Tick_Value' correspondientes al símbolo.
+    Retorna un DataFrame con columnas: [Symbol, Open, High, Low, Close, Volume]
     """
     rates = mt5.copy_rates_range(symbol, timeframe, start_date, end_date)
     if rates is None or len(rates) == 0:
@@ -84,11 +83,17 @@ def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataF
     df = df[["Open", "High", "Low", "Close", "Volume"]].astype("float64")
     df.insert(0, "Symbol", symbol)
 
-    # Obtener información del símbolo para agregar 'Point' y 'Tick_Value'
     symbol_info = mt5.symbol_info(symbol)
     if symbol_info is not None:
-        df["Point"] = symbol_info.point
-        df["Tick_Value"] = symbol_info.trade_tick_value
+        tick_size = symbol_info.trade_tick_size
+        tick_value = symbol_info.trade_tick_value
+        point_size = symbol_info.point
+
+        # Calcular el valor del punto (Point Value)
+        point_value = (tick_value * point_size / tick_size) if tick_size != 0 else None
+
+        df["Point"] = point_size
+        df["Tick_Value"] = tick_value
     else:
         df["Point"] = None
         df["Tick_Value"] = None
@@ -146,26 +151,16 @@ def process_data(start_date, end_date, symbols, timeframe):
 
 
 def SymbolSync(SelectedSymbols, show_info=True):
-    # Obtener la lista de todos los símbolos disponibles
     all_symbols = [symbol.name for symbol in mt5.symbols_get()]
-
-    # Convertir la lista de símbolos seleccionados en un conjunto para una búsqueda más eficiente
     selected_symbols_set = set(SelectedSymbols.split(", "))
-
-    # Crear una lista para mantener la información detallada de los símbolos
     symbol_details = []
 
     for index, symbol in enumerate(selected_symbols_set, start=1):
         if symbol in all_symbols:
-            # Obtener información detallada del símbolo
             symbol_info = mt5.symbol_info(symbol)
             mt5.symbol_select(symbol, True)
             mt5.symbol_info_tick(symbol)
-
-            # Verificar si el símbolo está sincronizado o no
             is_synced = "Yes" if symbol_info is not None else "No"
-
-            # Agregar información a la lista
             symbol_details.append(
                 {
                     "Orden": index,
@@ -206,17 +201,14 @@ def SymbolSync(SelectedSymbols, show_info=True):
                 }
             )
 
-    # Comprobar si todos los símbolos están sincronizados
     all_synced = all(detail["Sincronizado"] == "Yes" for detail in symbol_details)
 
-    # Mostrar el estado de sincronización si show_info es True en un dataframe
     if show_info:
         df = pd.DataFrame(symbol_details)
-        pd.set_option("display.max_rows", None)  # Mostrar todas las filas
-        pd.set_option("display.max_columns", None)  # Mostrar todas las columnas
+        pd.set_option("display.max_rows", None)
+        pd.set_option("display.max_columns", None)
         print(df)
 
-    # Devolver la lista de símbolos sincronizados
     if all_synced:
         return list(selected_symbols_set)
     else:

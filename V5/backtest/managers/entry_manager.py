@@ -7,7 +7,7 @@ class EntryManager:
     def __init__(
         self, initial_balance, strategies_params=None, symbol_points_mapping=None
     ):
-        self.position_manager = PositionManager(initial_balance)
+        self.position_manager = PositionManager(initial_balance, symbol_points_mapping)
         self.strategies_params = strategies_params or {}
         self.symbol_points_mapping = symbol_points_mapping or {}
         self.first_position_tp = {}
@@ -16,18 +16,22 @@ class EntryManager:
         self.tp_distance = self.strategies_params.get("tp_distance", 100)
         self.grid_distance = self.strategies_params.get("grid_distance", 100)
         self.lot_multiplier = self.strategies_params.get("lot_multiplier", 1.35)
-        self.initial_lot_size = self.strategies_params.get("initial_lot_size", 10.0)
+        self.initial_lot_size = self.strategies_params.get("initial_lot_size", 0.01)
+
+    def get_symbol_data(self, symbol):
+        """Devuelve (point, tick_value) para un símbolo dado."""
+        if symbol not in self.symbol_points_mapping:
+            raise ValueError(f"Symbol {symbol} not found in provided symbol mapping.")
+        data = self.symbol_points_mapping[symbol]
+        return data["point"], data["tick_value"]
 
     def get_symbol_points(self, symbol):
-        if symbol in self.symbol_points_mapping:
-            return self.symbol_points_mapping[symbol]
-        else:
-            raise ValueError(
-                f"Symbol {symbol} not found in provided symbol points mapping."
-            )
+        """Devuelve únicamente el 'point' para un símbolo dado."""
+        point, _ = self.get_symbol_data(symbol)
+        return point
 
     def calculate_tp_sl(self, current_price, symbol, is_buy=True):
-        point = self.get_symbol_points(symbol)
+        point, _ = self.get_symbol_data(symbol)
         tp_distance = self.tp_distance * point
         sl_distance = self.strategies_params.get("sl_distance", None)
         if is_buy:
@@ -73,7 +77,7 @@ class EntryManager:
         )
 
     def grid_buy(self, symbol, current_price, date):
-        point = self.get_symbol_points(symbol)
+        point = self.get_symbol_points(symbol)  # Ahora existe este método
         long_positions = self.get_positions(symbol, "long")
         if not long_positions:
             tp = current_price + self.tp_distance * point
