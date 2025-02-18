@@ -77,7 +77,7 @@ class EntryManager:
         )
 
     def grid_buy(self, symbol, current_price, date):
-        point = self.get_symbol_points(symbol)  # Ahora existe este método
+        point = self.get_symbol_points(symbol)
         long_positions = self.get_positions(symbol, "long")
         if not long_positions:
             tp = current_price + self.tp_distance * point
