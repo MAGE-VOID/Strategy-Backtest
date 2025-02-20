@@ -1,33 +1,99 @@
-# backtest/engine.py
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from itertools import product
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
-from backtest.config import BacktestConfig
 from backtest.progress import BarProgress
-from backtest.optimization_engine import OptimizationEngine  # Importamos el optimizador
 
 
-class BacktestEngine:
+class OptimizationEngine:
     """
-    Motor del backtest que utiliza un objeto de configuración para centralizar parámetros.
+    Motor de optimización que maneja el proceso de backtesting con múltiples combinaciones de parámetros.
     """
 
-    def __init__(self, config: BacktestConfig):
+    def __init__(self, config, input_data: pd.DataFrame):
         self.config = config
-        self.strategy_manager = None
+        self.input_data = input_data
+        self.best_result = None
+        self.best_stats = None
         self.equity_over_time = []
 
-    def run_backtest(self, input_data: pd.DataFrame) -> dict:
-        if self.config.mode == "optimization":
-            optimization_engine = OptimizationEngine(self.config, input_data)
-            return optimization_engine.run_optimization()
-        else:
-            # Si el modo es "single", ejecutamos un backtest normal
-            return self._run_single_backtest(input_data)
+    def generate_combinations(self, optimization_params):
+        """
+        Genera todas las combinaciones posibles de los parámetros de optimización.
+        """
+        param_1_values = np.arange(
+            optimization_params["params_1"]["start"],
+            optimization_params["params_1"]["stop"],
+            optimization_params["params_1"]["step"],
+        )
+        param_2_values = np.arange(
+            optimization_params["params_2"]["start"],
+            optimization_params["params_2"]["stop"],
+            optimization_params["params_2"]["step"],
+        )
+
+        # Genera todas las combinaciones posibles entre los parámetros
+        return list(product(param_1_values, param_2_values))
+
+    def run_optimization(self):
+        """
+        Ejecuta la optimización: evalúa todas las combinaciones de parámetros.
+        """
+        # Obtiene los parámetros de optimización de la clase StrategySignal
+        strategy_signal = self.config.strategy_signal_class(self.input_data)
+        optimization_params = strategy_signal.get_optimization_params()
+
+        # Genera todas las combinaciones posibles de parámetros
+        param_combinations = self.generate_combinations(optimization_params)
+
+        print(f"Total de combinaciones de parámetros: {len(param_combinations)}")
+
+        # Listado para almacenar los resultados de cada backtest
+        results = []
+
+        for param_1_value, param_2_value in param_combinations:
+            # Establecer los parámetros optimizados en la estrategia
+            strategy_signal.set_optimized_params(
+                {"params_1": param_1_value, "params_2": param_2_value}
+            )
+
+            # Realizar el backtest con los parámetros optimizados
+            result_backtest = self._run_single_backtest(self.input_data)
+
+            # Guardar el resultado de este backtest
+            results.append(result_backtest)
+
+            # Extraer estadísticas y comparar si es el mejor resultado
+            stats = result_backtest["statistics"]
+
+            # Verificar si stats es un diccionario
+            if isinstance(stats, dict):
+                win_rate = stats.get("Win Rate [%]", 0)
+            else:
+                print("Error: las estadísticas no están en formato diccionario.")
+                continue  # Saltamos a la siguiente iteración del backtest
+
+            # Comparar con el mejor resultado basado en Win Rate
+            if self.best_result is None or win_rate > self.best_stats:
+                self.best_result = result_backtest
+                self.best_stats = win_rate
+
+        stats = self.best_result[
+            "statistics"
+        ]
+
+        return {
+            "trades": self.best_result["trades"],
+            "equity_over_time": self.best_result["equity_over_time"],
+            "statistics": stats,
+        }
 
     def _run_single_backtest(self, input_data: pd.DataFrame) -> dict:
+        """
+        Realiza un backtest simple con los parámetros actuales de la estrategia.
+        """
         input_data = self._preprocess_data(input_data)
 
         symbol_points_mapping = self._build_symbol_points_mapping(input_data)
@@ -72,21 +138,10 @@ class BacktestEngine:
 
             self._update_equity(current_prices, date)
 
-            if self.config.debug_mode == "realtime":
-                results = self.strategy_manager.get_results()
-                current_trade_count = len(results)
-                if current_trade_count > prev_trade_count:
-                    for trade in results[prev_trade_count:]:
-                        print(trade)
-                    prev_trade_count = current_trade_count
-
             progress_current += 1
             progress_bar.update(progress_current + 1)
 
         progress_bar.stop()
-
-        if self.config.debug_mode == "final":
-            self._debug_positions()
 
         statistics_calculator = Statistics(
             self.strategy_manager.get_results(),
@@ -168,7 +223,3 @@ class BacktestEngine:
             equity += floating_profit
 
         return equity
-
-    def _debug_positions(self):
-        for trade in self.strategy_manager.get_results():
-            print(trade)
