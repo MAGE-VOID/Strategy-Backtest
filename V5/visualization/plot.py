@@ -20,9 +20,6 @@ def plot_equity_balance(
         result_backtest (dict): Diccionario con resultados del backtest, que debe incluir la clave "equity_over_time".
         max_points (int): Número máximo de puntos a trazar; si se supera, se reduce la muestra para mejorar el rendimiento.
         theme (str): "dark" o "white". En dark mode se utiliza el template "plotly_dark" y colores optimizados.
-
-    Returns:
-        go.Figure: Objeto de figura de Plotly.
     """
     # Seleccionar template y mapa de colores según el tema
     if theme.lower() == "dark":
@@ -42,13 +39,11 @@ def plot_equity_balance(
     df["date"] = pd.to_datetime(df["date"])
     df.sort_values("date", inplace=True)
 
-    # Downsampling para mejorar el rendimiento en grandes datasets
     n_points = len(df)
     if n_points > max_points:
         step = int(n_points / max_points)
         df = df.iloc[::step].reset_index(drop=True)
 
-    # Crear el gráfico interactivo con Plotly Express
     fig = px.line(
         df,
         x="date",
@@ -59,14 +54,12 @@ def plot_equity_balance(
         template=template,
     )
 
-    # Actualizar el layout para mejorar la interactividad y la presentación
     fig.update_layout(
         xaxis_title="Date",
         yaxis_title="Value",
         legend_title="Metric",
         hovermode="x unified",
     )
-    # Ajustar los trazados para que las líneas sean delgadas y precisas
     fig.update_traces(line=dict(width=1, shape="linear"))
 
     fig.show()
