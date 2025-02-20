@@ -80,9 +80,7 @@ class OptimizationEngine:
                 self.best_result = result_backtest
                 self.best_stats = win_rate
 
-        stats = self.best_result[
-            "statistics"
-        ]
+        stats = self.best_result["statistics"]
 
         return {
             "trades": self.best_result["trades"],
