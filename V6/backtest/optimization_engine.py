@@ -6,7 +6,6 @@ from itertools import product
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.progress import BarProgress
-from visualization.plot import plot_equity_balance
 
 
 class OptimizationEngine:
@@ -26,7 +25,7 @@ class OptimizationEngine:
         for i, (param_key, param_info) in enumerate(
             optimization_params.items(), start=1
         ):
-            param_type = param_info.get("type", "float")  # Por defecto "float"
+            param_type = param_info.get("type", "float")
             if param_type in ["int", "float"]:
                 start = param_info.get("start")
                 stop = param_info.get("stop")
@@ -74,7 +73,6 @@ class OptimizationEngine:
 
             best_backtest_result = self.update_best_result(result_backtest)
 
-        # Finalmente retornamos el mejor resultado
         return {
             "trades": best_backtest_result["trades"],
             "equity_over_time": best_backtest_result["equity_over_time"],
@@ -99,12 +97,16 @@ class OptimizationEngine:
         return self.best_result
 
     def _run_single_backtest(self, input_data: pd.DataFrame, strategy_signal) -> dict:
-        # Preprocesar, inicializar
+        """
+        Realiza un backtest simple con los parámetros actuales de la estrategia.
+        """
+        # Preprocesar datos e inicializar managers
         input_data = self._preprocess_data(input_data)
         symbol_points_mapping = self._build_symbol_points_mapping(input_data)
         self._init_managers(symbol_points_mapping)
         self.equity_over_time.clear()
 
+        # Preparar datos
         all_dates, filled_data, signals = self._prepare_data(
             input_data, lambda df: strategy_signal
         )
@@ -114,6 +116,7 @@ class OptimizationEngine:
         progress_bar = BarProgress(total_steps)
         progress_current = 0
 
+        # Iteramos cada vela
         for i, date in enumerate(all_dates):
             current_prices = {
                 symbol: arr[i]
@@ -123,6 +126,7 @@ class OptimizationEngine:
             if not current_prices:
                 continue
 
+            # Para cada símbolo, generamos señales y aplicamos la estrategia
             for symbol, price in current_prices.items():
                 signal_buy, signal_sell = signals[symbol].generate_signals_for_candle(i)
                 self.strategy_manager.manage_tp_sl(symbol, price, date)
@@ -136,14 +140,16 @@ class OptimizationEngine:
                     date,
                 )
 
+            # Actualizamos la equidad
             self._update_equity(current_prices, date)
 
+            # Barra de progreso
             progress_current += 1
             progress_bar.update(progress_current + 1)
 
         progress_bar.stop()
 
-        # Cálculo de estadísticas
+        # Calcular estadísticas
         statistics_calculator = Statistics(
             self.strategy_manager.get_results(),
             self.equity_over_time,
@@ -151,14 +157,15 @@ class OptimizationEngine:
         )
         stats = statistics_calculator.calculate_statistics()
 
-        # ¡Clonamos las listas para no sobrescribirlas en iteraciones siguientes!
+        # Clonamos las listas y el dict de estadísticas para que no se sobrescriban
         trades_copy = copy.deepcopy(self.strategy_manager.get_results())
         equity_copy = copy.deepcopy(self.equity_over_time)
+        stats_copy = copy.deepcopy(stats)
 
         return {
             "trades": trades_copy,
             "equity_over_time": equity_copy,
-            "statistics": stats,
+            "statistics": stats_copy,
         }
 
     # ------------------- Funciones Auxiliares ------------------- #
