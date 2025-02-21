@@ -46,4 +46,4 @@ if __name__ == "__main__":
     print("\n--- Backtest Statistics ---")
     print(stats_df)
 
-    #plot_equity_balance(result_backtest)
+    plot_equity_balance(result_backtest)

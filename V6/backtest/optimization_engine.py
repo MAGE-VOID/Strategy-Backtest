@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import copy
 from datetime import datetime
 from itertools import product
 from backtest.stats import Statistics
@@ -14,9 +15,6 @@ class OptimizationEngine:
     """
 
     def __init__(self, config, input_data: pd.DataFrame):
-        """
-        Inicializa el motor de optimización con la configuración y los datos de entrada.
-        """
         self.config = config
         self.input_data = input_data
         self.best_result = None
@@ -24,107 +22,72 @@ class OptimizationEngine:
         self.equity_over_time = []
 
     def generate_combinations(self, optimization_params):
-        """
-        Genera todas las combinaciones posibles de los parámetros de optimización.
-        Soporta parámetros int, float y bool.
-        Además, imprime la lista de valores para cada parámetro.
-        """
         param_values = []
-        param_keys = list(optimization_params.keys())
-
         for i, (param_key, param_info) in enumerate(
             optimization_params.items(), start=1
         ):
-            param_type = param_info.get("type", "float")  # Por defecto, "float"
-
-            # Según el tipo de parámetro, construimos la lista de valores
+            param_type = param_info.get("type", "float")  # Por defecto "float"
             if param_type in ["int", "float"]:
                 start = param_info.get("start")
                 stop = param_info.get("stop")
                 step = param_info.get("step")
-
                 if start is None or stop is None or step is None:
                     raise ValueError(
-                        f"El parámetro {param_key} de tipo {param_type} no tiene start/stop/step definidos."
+                        f"Parámetros de rango no definidos correctamente para {param_key}"
                     )
-
                 generated_values = np.arange(
                     start, stop, step, dtype=float if param_type == "float" else int
                 )
-
                 print(
                     f"Lista {i} para {param_key} (tipo {param_type}): {generated_values}"
                 )
-
                 param_values.append(generated_values)
 
             elif param_type == "bool":
                 generated_values = [True, False]
                 print(f"Lista {i} para {param_key} (tipo bool): {generated_values}")
                 param_values.append(generated_values)
-
             else:
                 raise ValueError(
                     f"Tipo de parámetro desconocido para {param_key}: {param_type}"
                 )
-
-        # Ahora generamos todas las combinaciones con product(*param_values)
-        # y las retornamos como lista
         return list(product(*param_values))
 
     def run_optimization(self):
-        """
-        Ejecuta la optimización: evalúa todas las combinaciones de parámetros.
-        """
         strategy_signal = self.config.strategy_signal_class(self.input_data)
         optimization_params = strategy_signal.get_optimization_params()
 
-        # Generamos las listas de valores de cada parámetro y las combinaciones
         param_combinations = self.generate_combinations(optimization_params)
-
         print(f"\nTotal de combinaciones de parámetros: {len(param_combinations)}\n")
 
-        # Listado para almacenar los resultados de cada backtest
-        for idx, param_values in enumerate(param_combinations, start=1):
-            # Imprimimos la combinación actual
-            print(f"Combinación {idx}: {param_values}")
+        best_backtest_result = None
 
-            # Convertimos la tupla param_values en un diccionario con el mismo
-            # orden de llaves que en optimization_params
+        for idx, param_values in enumerate(param_combinations, start=1):
+            print(f"Combinación {idx}: {param_values}")
             params_dict = dict(zip(optimization_params.keys(), param_values))
 
-            # Aplicar los parámetros optimizados a la estrategia
             strategy_signal.set_optimized_params(params_dict)
 
-            # Realizar el backtest con los parámetros optimizados
             result_backtest = self._run_single_backtest(
                 self.input_data, strategy_signal
             )
 
-            # Usamos la nueva función modularizada para actualizar el mejor resultado
-            self.update_best_result(result_backtest)
+            best_backtest_result = self.update_best_result(result_backtest)
 
-        # Devolver todos los resultados del mejor backtest encontrado
-        best_backtest_result = self.best_result
-
+        # Finalmente retornamos el mejor resultado
         return {
             "trades": best_backtest_result["trades"],
             "equity_over_time": best_backtest_result["equity_over_time"],
             "statistics": best_backtest_result["statistics"],
         }
 
-    def update_best_result(self, result_backtest):
-        """
-        Compara el win_rate del resultado actual con el mejor conocido y actualiza si es necesario.
-        """
+    def update_best_result(self, result_backtest: dict) -> dict:
         stats = result_backtest["statistics"]
-        if isinstance(stats, dict):
-            win_rate = stats.get("Win Rate [%]", 0)
-        else:
+        if not isinstance(stats, dict):
             print("Error: las estadísticas no están en formato diccionario.")
-            return
+            return self.best_result
 
-        # Si no hay un mejor resultado aún o el win_rate actual es mayor, actualizamos el mejor resultado
+        win_rate = stats.get("Win Rate [%]", 0)
         if self.best_result is None or win_rate > self.best_stats:
             self.best_result = {
                 "trades": result_backtest["trades"],
@@ -133,14 +96,11 @@ class OptimizationEngine:
             }
             self.best_stats = win_rate
 
-        plot_equity_balance(result_backtest)
+        return self.best_result
 
     def _run_single_backtest(self, input_data: pd.DataFrame, strategy_signal) -> dict:
-        """
-        Realiza un backtest simple con los parámetros actuales de la estrategia.
-        """
+        # Preprocesar, inicializar
         input_data = self._preprocess_data(input_data)
-
         symbol_points_mapping = self._build_symbol_points_mapping(input_data)
         self._init_managers(symbol_points_mapping)
         self.equity_over_time.clear()
@@ -148,13 +108,12 @@ class OptimizationEngine:
         all_dates, filled_data, signals = self._prepare_data(
             input_data, lambda df: strategy_signal
         )
-
         symbol_lengths = {symbol: arr.shape[0] for symbol, arr in filled_data.items()}
+
         total_steps = len(all_dates)
         progress_bar = BarProgress(total_steps)
         progress_current = 0
 
-        # Bucle principal del backtest
         for i, date in enumerate(all_dates):
             current_prices = {
                 symbol: arr[i]
@@ -184,6 +143,7 @@ class OptimizationEngine:
 
         progress_bar.stop()
 
+        # Cálculo de estadísticas
         statistics_calculator = Statistics(
             self.strategy_manager.get_results(),
             self.equity_over_time,
@@ -191,13 +151,17 @@ class OptimizationEngine:
         )
         stats = statistics_calculator.calculate_statistics()
 
+        # ¡Clonamos las listas para no sobrescribirlas en iteraciones siguientes!
+        trades_copy = copy.deepcopy(self.strategy_manager.get_results())
+        equity_copy = copy.deepcopy(self.equity_over_time)
+
         return {
-            "trades": self.strategy_manager.get_results(),
-            "equity_over_time": self.equity_over_time,
+            "trades": trades_copy,
+            "equity_over_time": equity_copy,
             "statistics": stats,
         }
 
-    # ------------------- Funciones auxiliares ------------------- #
+    # ------------------- Funciones Auxiliares ------------------- #
 
     def _build_symbol_points_mapping(self, input_data: pd.DataFrame) -> dict:
         symbol_mapping = {}
@@ -220,12 +184,11 @@ class OptimizationEngine:
         all_dates = input_data.index.unique()
         grouped_data = input_data.groupby("Symbol")
         filled_data = {}
-        signal_generators = {} if strategy_signal_factory else None
+        signal_generators = {}
 
         for symbol, group in grouped_data:
             filled_data[symbol] = group["Open"].values
-            if strategy_signal_factory:
-                signal_generators[symbol] = strategy_signal_factory(group)
+            signal_generators[symbol] = strategy_signal_factory(group)
 
         return all_dates, filled_data, signal_generators
 
@@ -243,13 +206,11 @@ class OptimizationEngine:
     ) -> float:
         symbol_points_map = self.strategy_manager.symbol_points_mapping
         equity = balance
-
         for pos in positions.values():
             symbol = pos["symbol"]
             cp = current_prices.get(symbol, 0)
             if cp == 0:
                 continue
-
             point = symbol_points_map[symbol]["point"]
             tick_value = symbol_points_map[symbol]["tick_value"]
 
@@ -260,5 +221,4 @@ class OptimizationEngine:
 
             floating_profit = (price_diff / point) * tick_value * pos["lot_size"]
             equity += floating_profit
-
         return equity
