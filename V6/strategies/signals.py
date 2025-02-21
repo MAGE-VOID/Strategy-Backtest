@@ -35,7 +35,7 @@ class StrategySignal:
         signal_buy = self.engine_buy
         signal_sell = self.engine_sell
 
-        # signal_buy = True
+        signal_buy = False
         # signal_sell = False
 
         return signal_buy, signal_sell
