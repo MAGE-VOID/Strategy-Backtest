@@ -1,6 +1,6 @@
 class StrategySignal:
     def __init__(self, input_data):
-        self.required_data_length = 1000
+        self.required_data_length = 100
         self.open_prices = input_data["Open"].values
         self.high_prices = input_data["High"].values
         self.low_prices = input_data["Low"].values
@@ -9,16 +9,8 @@ class StrategySignal:
 
         # Parámetros de optimización definidos dentro de la clase
         self.optimization_params = {
-            "params_1": {
-                "start": 0.0,
-                "step": 0.01,
-                "stop": 0.02,
-            },
-            "params_2": {
-                "start": 0.0,
-                "step": 0.01,
-                "stop": 0.02,
-            },
+            "params_1": {"start": None, "step": None, "stop": None, "type": "bool"},
+            "params_2": {"start": None, "step": None, "stop": None, "type": "bool"},
         }
 
         # Inicialización de los parámetros optimizados
@@ -29,7 +21,9 @@ class StrategySignal:
         return self.optimization_params
 
     def set_optimized_params(self, params):
-        # Establece los parámetros optimizados recibidos para usarlos en el backtest
+        """
+        Establece los parámetros recibidos para usarlos en el backtest.
+        """
         self.engine_buy = params["params_1"]
         self.engine_sell = params["params_2"]
 
@@ -37,14 +31,11 @@ class StrategySignal:
         if index < self.required_data_length:
             return False, False
 
-        # Calculamos la diferencia entre el open de la vela actual y el open de la vela anterior
-        open_difference = (
-            (self.open_prices[index] - self.open_prices[index - 1])
-            / self.open_prices[index - 1]
-            * 100
-        )
+        # Generación de señales basada en los parámetros optimizados
+        signal_buy = self.engine_buy
+        signal_sell = self.engine_sell
 
-        signal_buy = open_difference > self.engine_buy
-        signal_sell = open_difference < -self.engine_sell
+        # signal_buy = True
+        # signal_sell = False
 
         return signal_buy, signal_sell

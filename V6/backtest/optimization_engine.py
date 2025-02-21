@@ -5,6 +5,7 @@ from itertools import product
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.progress import BarProgress
+from visualization.plot import plot_equity_balance
 
 
 class OptimizationEngine:
@@ -13,6 +14,9 @@ class OptimizationEngine:
     """
 
     def __init__(self, config, input_data: pd.DataFrame):
+        """
+        Inicializa el motor de optimización con la configuración y los datos de entrada.
+        """
         self.config = config
         self.input_data = input_data
         self.best_result = None
@@ -22,73 +26,116 @@ class OptimizationEngine:
     def generate_combinations(self, optimization_params):
         """
         Genera todas las combinaciones posibles de los parámetros de optimización.
+        Soporta parámetros int, float y bool.
+        Además, imprime la lista de valores para cada parámetro.
         """
-        param_1_values = np.arange(
-            optimization_params["params_1"]["start"],
-            optimization_params["params_1"]["stop"],
-            optimization_params["params_1"]["step"],
-        )
-        param_2_values = np.arange(
-            optimization_params["params_2"]["start"],
-            optimization_params["params_2"]["stop"],
-            optimization_params["params_2"]["step"],
-        )
+        param_values = []
+        param_keys = list(optimization_params.keys())
 
-        # Genera todas las combinaciones posibles entre los parámetros
-        return list(product(param_1_values, param_2_values))
+        for i, (param_key, param_info) in enumerate(
+            optimization_params.items(), start=1
+        ):
+            param_type = param_info.get("type", "float")  # Por defecto, "float"
+
+            # Según el tipo de parámetro, construimos la lista de valores
+            if param_type in ["int", "float"]:
+                start = param_info.get("start")
+                stop = param_info.get("stop")
+                step = param_info.get("step")
+
+                if start is None or stop is None or step is None:
+                    raise ValueError(
+                        f"El parámetro {param_key} de tipo {param_type} no tiene start/stop/step definidos."
+                    )
+
+                generated_values = np.arange(
+                    start, stop, step, dtype=float if param_type == "float" else int
+                )
+
+                print(
+                    f"Lista {i} para {param_key} (tipo {param_type}): {generated_values}"
+                )
+
+                param_values.append(generated_values)
+
+            elif param_type == "bool":
+                generated_values = [True, False]
+                print(f"Lista {i} para {param_key} (tipo bool): {generated_values}")
+                param_values.append(generated_values)
+
+            else:
+                raise ValueError(
+                    f"Tipo de parámetro desconocido para {param_key}: {param_type}"
+                )
+
+        # Ahora generamos todas las combinaciones con product(*param_values)
+        # y las retornamos como lista
+        return list(product(*param_values))
 
     def run_optimization(self):
         """
         Ejecuta la optimización: evalúa todas las combinaciones de parámetros.
         """
-        # Obtiene los parámetros de optimización de la clase StrategySignal
         strategy_signal = self.config.strategy_signal_class(self.input_data)
         optimization_params = strategy_signal.get_optimization_params()
 
-        # Genera todas las combinaciones posibles de parámetros
+        # Generamos las listas de valores de cada parámetro y las combinaciones
         param_combinations = self.generate_combinations(optimization_params)
 
-        print(f"Total de combinaciones de parámetros: {len(param_combinations)}")
+        print(f"\nTotal de combinaciones de parámetros: {len(param_combinations)}\n")
 
         # Listado para almacenar los resultados de cada backtest
-        results = []
+        for idx, param_values in enumerate(param_combinations, start=1):
+            # Imprimimos la combinación actual
+            print(f"Combinación {idx}: {param_values}")
 
-        for param_1_value, param_2_value in param_combinations:
-            # Establecer los parámetros optimizados en la estrategia
-            strategy_signal.set_optimized_params(
-                {"params_1": param_1_value, "params_2": param_2_value}
-            )
+            # Convertimos la tupla param_values en un diccionario con el mismo
+            # orden de llaves que en optimization_params
+            params_dict = dict(zip(optimization_params.keys(), param_values))
+
+            # Aplicar los parámetros optimizados a la estrategia
+            strategy_signal.set_optimized_params(params_dict)
 
             # Realizar el backtest con los parámetros optimizados
-            result_backtest = self._run_single_backtest(self.input_data)
+            result_backtest = self._run_single_backtest(
+                self.input_data, strategy_signal
+            )
 
-            # Guardar el resultado de este backtest
-            results.append(result_backtest)
+            # Usamos la nueva función modularizada para actualizar el mejor resultado
+            self.update_best_result(result_backtest)
 
-            # Extraer estadísticas y comparar si es el mejor resultado
-            stats = result_backtest["statistics"]
-
-            # Verificar si stats es un diccionario
-            if isinstance(stats, dict):
-                win_rate = stats.get("Win Rate [%]", 0)
-            else:
-                print("Error: las estadísticas no están en formato diccionario.")
-                continue  # Saltamos a la siguiente iteración del backtest
-
-            # Comparar con el mejor resultado basado en Win Rate
-            if self.best_result is None or win_rate > self.best_stats:
-                self.best_result = result_backtest
-                self.best_stats = win_rate
-
-        stats = self.best_result["statistics"]
+        # Devolver todos los resultados del mejor backtest encontrado
+        best_backtest_result = self.best_result
 
         return {
-            "trades": self.best_result["trades"],
-            "equity_over_time": self.best_result["equity_over_time"],
-            "statistics": stats,
+            "trades": best_backtest_result["trades"],
+            "equity_over_time": best_backtest_result["equity_over_time"],
+            "statistics": best_backtest_result["statistics"],
         }
 
-    def _run_single_backtest(self, input_data: pd.DataFrame) -> dict:
+    def update_best_result(self, result_backtest):
+        """
+        Compara el win_rate del resultado actual con el mejor conocido y actualiza si es necesario.
+        """
+        stats = result_backtest["statistics"]
+        if isinstance(stats, dict):
+            win_rate = stats.get("Win Rate [%]", 0)
+        else:
+            print("Error: las estadísticas no están en formato diccionario.")
+            return
+
+        # Si no hay un mejor resultado aún o el win_rate actual es mayor, actualizamos el mejor resultado
+        if self.best_result is None or win_rate > self.best_stats:
+            self.best_result = {
+                "trades": result_backtest["trades"],
+                "equity_over_time": result_backtest["equity_over_time"],
+                "statistics": result_backtest["statistics"],
+            }
+            self.best_stats = win_rate
+
+        plot_equity_balance(result_backtest)
+
+    def _run_single_backtest(self, input_data: pd.DataFrame, strategy_signal) -> dict:
         """
         Realiza un backtest simple con los parámetros actuales de la estrategia.
         """
@@ -99,15 +146,11 @@ class OptimizationEngine:
         self.equity_over_time.clear()
 
         all_dates, filled_data, signals = self._prepare_data(
-            input_data, self.config.strategy_signal_class
+            input_data, lambda df: strategy_signal
         )
-        if signals is None:
-            raise ValueError("No se proporcionó una clase para generar señales.")
 
         symbol_lengths = {symbol: arr.shape[0] for symbol, arr in filled_data.items()}
         total_steps = len(all_dates)
-        prev_trade_count = 0
-
         progress_bar = BarProgress(total_steps)
         progress_current = 0
 
@@ -154,6 +197,8 @@ class OptimizationEngine:
             "statistics": stats,
         }
 
+    # ------------------- Funciones auxiliares ------------------- #
+
     def _build_symbol_points_mapping(self, input_data: pd.DataFrame) -> dict:
         symbol_mapping = {}
         for symbol, group in input_data.groupby("Symbol"):
@@ -171,16 +216,16 @@ class OptimizationEngine:
         input_data.sort_index(inplace=True)
         return input_data
 
-    def _prepare_data(self, input_data: pd.DataFrame, strategy_signal_class):
+    def _prepare_data(self, input_data: pd.DataFrame, strategy_signal_factory):
         all_dates = input_data.index.unique()
         grouped_data = input_data.groupby("Symbol")
         filled_data = {}
-        signal_generators = {} if strategy_signal_class else None
+        signal_generators = {} if strategy_signal_factory else None
 
         for symbol, group in grouped_data:
             filled_data[symbol] = group["Open"].values
-            if strategy_signal_class:
-                signal_generators[symbol] = strategy_signal_class(group)
+            if strategy_signal_factory:
+                signal_generators[symbol] = strategy_signal_factory(group)
 
         return all_dates, filled_data, signal_generators
 
@@ -190,11 +235,7 @@ class OptimizationEngine:
         equity = self._calculate_equity(positions, current_prices, balance)
 
         self.equity_over_time.append(
-            {
-                "date": date,
-                "equity": equity,
-                "balance": balance,
-            }
+            {"date": date, "equity": equity, "balance": balance}
         )
 
     def _calculate_equity(
