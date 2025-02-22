@@ -3,7 +3,7 @@ from datetime import datetime
 import MetaTrader5 as mt5
 from data import custom as data
 from backtest.engine import BacktestEngine, BacktestConfig
-from backtest.formatters import format_statistics
+from backtest.utils.formatters import format_statistics
 from visualization.plot import plot_equity_balance
 from strategies.signals import StrategySignal
 

@@ -5,8 +5,8 @@ from datetime import datetime
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.config import BacktestConfig
-from backtest.progress import BarProgress
-from backtest.optimization_engine import OptimizationEngine  # Importamos el optimizador
+from backtest.utils.progress import BarProgress
+from backtest.optimization_engine import OptimizationEngine
 
 
 class BacktestEngine:
@@ -24,7 +24,6 @@ class BacktestEngine:
             optimization_engine = OptimizationEngine(self.config, input_data)
             return optimization_engine.run_optimization()
         else:
-            # Si el modo es "single", ejecutamos un backtest normal
             return self._run_single_backtest(input_data)
 
     def _run_single_backtest(self, input_data: pd.DataFrame) -> dict:

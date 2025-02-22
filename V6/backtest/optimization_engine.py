@@ -5,7 +5,7 @@ from datetime import datetime
 from itertools import product
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
-from backtest.progress import BarProgress
+from backtest.utils.progress import BarProgress
 
 
 class OptimizationEngine:
