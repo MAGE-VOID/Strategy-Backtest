@@ -1,3 +1,4 @@
+# strategies/signals.py
 class StrategySignal:
     def __init__(self, input_data):
         self.required_data_length = 100
