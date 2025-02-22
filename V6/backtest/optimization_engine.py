@@ -52,33 +52,6 @@ class OptimizationEngine:
                 )
         return list(product(*param_values))
 
-    def run_optimization(self):
-        strategy_signal = self.config.strategy_signal_class(self.input_data)
-        optimization_params = strategy_signal.get_optimization_params()
-
-        param_combinations = self.generate_combinations(optimization_params)
-        print(f"\nTotal de combinaciones de parámetros: {len(param_combinations)}\n")
-
-        best_backtest_result = None
-
-        for idx, param_values in enumerate(param_combinations, start=1):
-            print(f"Combinación {idx}: {param_values}")
-            params_dict = dict(zip(optimization_params.keys(), param_values))
-
-            strategy_signal.set_optimized_params(params_dict)
-
-            result_backtest = self._run_single_backtest(
-                self.input_data, strategy_signal
-            )
-
-            best_backtest_result = self.update_best_result(result_backtest)
-
-        return {
-            "trades": best_backtest_result["trades"],
-            "equity_over_time": best_backtest_result["equity_over_time"],
-            "statistics": best_backtest_result["statistics"],
-        }
-
     def update_best_result(self, result_backtest: dict) -> dict:
         stats = result_backtest["statistics"]
         if not isinstance(stats, dict):
@@ -96,12 +69,34 @@ class OptimizationEngine:
 
         return self.best_result
 
+    def run_optimization(self):
+        strategy_signal = self.config.strategy_signal_class(self.input_data)
+        optimization_params = strategy_signal.get_optimization_params()
+
+        param_combinations = self.generate_combinations(optimization_params)
+        print(f"\nTotal de combinaciones de parámetros: {len(param_combinations)}\n")
+
+        preprocessed_data = self._preprocess_data(self.input_data.copy())
+
+        best_backtest_result = None
+
+        for idx, param_values in enumerate(param_combinations, start=1):
+            print(f"Combinación {idx}: {param_values}")
+            params_dict = dict(zip(optimization_params.keys(), param_values))
+            strategy_signal.set_optimized_params(params_dict)
+
+            result_backtest = self._run_single_backtest(
+                preprocessed_data, strategy_signal
+            )
+            best_backtest_result = self.update_best_result(result_backtest)
+
+        return {
+            "trades": best_backtest_result["trades"],
+            "equity_over_time": best_backtest_result["equity_over_time"],
+            "statistics": best_backtest_result["statistics"],
+        }
+
     def _run_single_backtest(self, input_data: pd.DataFrame, strategy_signal) -> dict:
-        """
-        Realiza un backtest simple con los parámetros actuales de la estrategia.
-        """
-        # Preprocesar datos e inicializar managers
-        input_data = self._preprocess_data(input_data)
         symbol_points_mapping = self._build_symbol_points_mapping(input_data)
         self._init_managers(symbol_points_mapping)
         self.equity_over_time.clear()
@@ -157,7 +152,6 @@ class OptimizationEngine:
         )
         stats = statistics_calculator.calculate_statistics()
 
-        # Clonamos las listas y el dict de estadísticas para que no se sobrescriban
         trades_copy = copy.deepcopy(self.strategy_manager.get_results())
         equity_copy = copy.deepcopy(self.equity_over_time)
         stats_copy = copy.deepcopy(stats)
