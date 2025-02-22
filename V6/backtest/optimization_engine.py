@@ -71,7 +71,7 @@ class OptimizationEngine:
 
     def run_optimization(self):
         strategy_signal = self.config.strategy_signal_class(self.input_data)
-        optimization_params = strategy_signal.get_optimization_params()
+        optimization_params = strategy_signal.optimization_params
 
         param_combinations = self.generate_combinations(optimization_params)
         print(f"\nTotal de combinaciones de parámetros: {len(param_combinations)}\n")
