@@ -26,7 +26,7 @@ class StrategySignal:
         signal_buy = self.optimized_params.get("params_1")
         signal_sell = self.optimized_params.get("params_2")
 
-        signal_buy = True
-        signal_sell = True
+        #signal_buy = True
+        #signal_sell = True
 
         return signal_buy, signal_sell

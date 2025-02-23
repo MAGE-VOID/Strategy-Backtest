@@ -36,7 +36,7 @@ if __name__ == "__main__":
         strategy_name="grid_buy",
         strategy_signal_class=StrategySignal,
         debug_mode="none",  # opciones: "none", "final", "realtime"
-        mode="single",  # opciones: "single" o "optimization"
+        mode="optimization",  # opciones: "single" o "optimization"
     )
 
     engine = BacktestEngine(config)
