@@ -1,3 +1,4 @@
+# backtest/optimization_engine.py
 import numpy as np
 import pandas as pd
 import copy
@@ -6,34 +7,11 @@ from itertools import product
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.utils.progress import BarProgress
-from concurrent.futures import ProcessPoolExecutor, as_completed
-
-
-def _run_combination(args):
-    """
-    Función auxiliar que se ejecuta en cada proceso:
-      - Recibe como argumentos: (config, preprocessed_data, param_keys, param_values)
-      - Crea una nueva instancia de la estrategia (strategy_signal)
-      - Establece los parámetros optimizados
-      - Instancia un OptimizationEngine y ejecuta un backtest para la combinación dada
-      - Se solicita no mostrar barra de progreso (use_progress=False)
-    """
-    config, preprocessed_data, param_keys, param_values = args
-    # Crear la instancia de la estrategia y configurar los parámetros optimizados
-    strategy_signal = config.strategy_signal_class(preprocessed_data)
-    strategy_signal.set_optimized_params(dict(zip(param_keys, param_values)))
-    # Crear una nueva instancia del motor para esta combinación
-    engine = OptimizationEngine(config, preprocessed_data)
-    result = engine._run_single_backtest(
-        preprocessed_data, strategy_signal, use_progress=False
-    )
-    return result
 
 
 class OptimizationEngine:
     """
     Motor de optimización que maneja el proceso de backtesting con múltiples combinaciones de parámetros.
-    Ahora preparado para ejecutar hasta 3 procesos en paralelo.
     """
 
     def __init__(self, config, input_data: pd.DataFrame):
@@ -93,7 +71,6 @@ class OptimizationEngine:
         return self.best_result
 
     def run_optimization(self):
-        # Inicializamos la estrategia para obtener los parámetros de optimización
         strategy_signal = self.config.strategy_signal_class(self.input_data)
         optimization_params = strategy_signal.optimization_params
 
@@ -104,30 +81,15 @@ class OptimizationEngine:
 
         best_backtest_result = None
 
-        # Preparar los argumentos para cada tarea
-        args_list = []
-        param_keys = list(optimization_params.keys())
-        for param_values in param_combinations:
-            args_list.append((self.config, preprocessed_data, param_keys, param_values))
+        for idx, param_values in enumerate(param_combinations, start=1):
+            print(f"Combinación {idx}: {param_values}")
+            params_dict = dict(zip(optimization_params.keys(), param_values))
+            strategy_signal.set_optimized_params(params_dict)
 
-        # Ejecutar en paralelo hasta 3 núcleos
-        with ProcessPoolExecutor(max_workers=3) as executor:
-            future_to_args = {
-                executor.submit(_run_combination, args): args for args in args_list
-            }
-            progress_bar = BarProgress(len(args_list))
-            completed = 0
-            for future in as_completed(future_to_args):
-                try:
-                    result = future.result()
-                except Exception as e:
-                    print(f"Error en combinación: {e}")
-                    result = None
-                if result is not None:
-                    best_backtest_result = self.update_best_result(result)
-                completed += 1
-                progress_bar.update(completed)
-            progress_bar.stop()
+            result_backtest = self._run_single_backtest(
+                preprocessed_data, strategy_signal
+            )
+            best_backtest_result = self.update_best_result(result_backtest)
 
         return {
             "trades": best_backtest_result["trades"],
@@ -135,9 +97,7 @@ class OptimizationEngine:
             "statistics": best_backtest_result["statistics"],
         }
 
-    def _run_single_backtest(
-        self, input_data: pd.DataFrame, strategy_signal, use_progress=True
-    ) -> dict:
+    def _run_single_backtest(self, input_data: pd.DataFrame, strategy_signal) -> dict:
         symbol_points_mapping = self._build_symbol_points_mapping(input_data)
         self._init_managers(symbol_points_mapping)
         self.equity_over_time.clear()
@@ -149,8 +109,7 @@ class OptimizationEngine:
         symbol_lengths = {symbol: arr.shape[0] for symbol, arr in filled_data.items()}
 
         total_steps = len(all_dates)
-        if use_progress:
-            progress_bar = BarProgress(total_steps)
+        progress_bar = BarProgress(total_steps)
         progress_current = 0
 
         # Iteramos cada vela
@@ -180,11 +139,11 @@ class OptimizationEngine:
             # Actualizamos la equidad
             self._update_equity(current_prices, date)
 
+            # Barra de progreso
             progress_current += 1
-            if use_progress:
-                progress_bar.update(progress_current)
-        if use_progress:
-            progress_bar.stop()
+            progress_bar.update(progress_current + 1)
+
+        progress_bar.stop()
 
         # Calcular estadísticas
         statistics_calculator = Statistics(
@@ -259,13 +218,11 @@ class OptimizationEngine:
     ) -> float:
         symbol_points_map = self.strategy_manager.symbol_points_mapping
         equity = balance
-
         for pos in positions.values():
             symbol = pos["symbol"]
             cp = current_prices.get(symbol, 0)
             if cp == 0:
                 continue
-
             point = symbol_points_map[symbol]["point"]
             tick_value = symbol_points_map[symbol]["tick_value"]
 
@@ -276,5 +233,4 @@ class OptimizationEngine:
 
             floating_profit = (price_diff / point) * tick_value * pos["lot_size"]
             equity += floating_profit
-
         return equity

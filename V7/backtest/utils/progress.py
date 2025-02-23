@@ -1,4 +1,4 @@
-# backtest/barprogress.py
+# backtest/utils/barprogress.py
 from rich.progress import (
     Progress,
     BarColumn,
