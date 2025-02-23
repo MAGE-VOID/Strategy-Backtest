@@ -134,7 +134,6 @@ class BacktestEngine:
         positions = self.strategy_manager.get_positions()
         balance = self.strategy_manager.get_balance()
         equity = self._calculate_equity(positions, current_prices, balance)
-        drawdown_exposure = equity - balance
         open_trades = len(positions)
         open_lots = sum(pos["lot_size"] for pos in positions.values())
 
@@ -143,7 +142,6 @@ class BacktestEngine:
                 "date": date,
                 "equity": equity,
                 "balance": balance,
-                "drawdown_exposure": drawdown_exposure,
                 "open_trades": open_trades,
                 "open_lots": open_lots,
             }

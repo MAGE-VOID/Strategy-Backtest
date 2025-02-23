@@ -89,8 +89,9 @@ def plot_equity_balance(
         step = int(n_points / max_points)
         df = df.iloc[::step].reset_index(drop=True)
 
-    if "drawdown_exposure" not in df.columns:
-        df["drawdown_exposure"] = df["equity"] - df["balance"]
+    # Calcular drawdown_exposure directamente entre equity y balance
+    df["drawdown_exposure"] = df["equity"] - df["balance"]
+
     if "open_trades" not in df.columns:
         df["open_trades"] = np.nan
     if "open_lots" not in df.columns:
