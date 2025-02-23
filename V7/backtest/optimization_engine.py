@@ -9,7 +9,7 @@ import multiprocessing
 import time
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
-from backtest.utils.barprogress_multi import MultiProgress  # Nuestro nuevo módulo
+from backtest.utils.barprogress_multi import MultiProgress
 
 
 class OptimizationEngine:
@@ -56,7 +56,7 @@ class OptimizationEngine:
         return list(product(*param_values))
 
     def run_optimization(self):
-        # Se crea una instancia de la señal para obtener los parámetros de optimización
+        # Instanciar la señal para obtener los parámetros de optimización
         strategy_signal = self.config.strategy_signal_class(self.input_data)
         optimization_params = strategy_signal.optimization_params
 
@@ -67,17 +67,17 @@ class OptimizationEngine:
         preprocessed_data = self._preprocess_data(self.input_data.copy())
 
         results = []
-        # Usamos un Manager para compartir el diccionario de progreso entre procesos
+        max_workers = 4  # Número de núcleos a usar
         with multiprocessing.Manager() as manager:
             progress_updates = (
                 manager.dict()
-            )  # Cada tarea actualizará: { task_id: {"progress": x, "total": y} }
-            with ProcessPoolExecutor(max_workers=2) as executor:
+            )  # { nucleo_id: {"progress": x, "total": y} }
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 futures = []
-                # Asignamos un id único (que usaremos para la barra individual) a cada combinación
+                # Se asigna a cada tarea un nucleo_id = idx % max_workers
                 for idx, param_values in enumerate(param_combinations):
                     params_dict = dict(zip(optimization_params.keys(), param_values))
-                    task_id = idx  # identificador único para la tarea
+                    nucleo_id = idx % max_workers
                     futures.append(
                         executor.submit(
                             _run_single_backtest_parallel,
@@ -85,41 +85,37 @@ class OptimizationEngine:
                                 self.config,
                                 preprocessed_data,
                                 params_dict,
-                                False,
-                                task_id,
+                                False,  # modo optimización: full_output=False
+                                nucleo_id,
                                 progress_updates,
                             ),
                         )
                     )
 
-                # Creamos la barra de progreso multi-núcleo
+                # Barra de progreso multi-núcleo para la optimización
                 multi_progress = MultiProgress(total_tasks=total_combinations)
                 multi_progress.start()
-                # Bucle de monitoreo: se actualiza la barra general y las individuales
                 while True:
                     done_count = sum([future.done() for future in futures])
                     multi_progress.update_overall(done_count)
-                    # Para cada tarea que haya iniciado (clave presente en progress_updates)
-                    for task_id, update in progress_updates.items():
+                    for nucleo_id, update in progress_updates.items():
                         current = update.get("progress", 0)
                         total = update.get("total", 1)
-                        # Si no se ha creado aún la barra individual para ese task_id, la agregamos
-                        if task_id not in multi_progress.worker_tasks:
+                        if nucleo_id not in multi_progress.worker_tasks:
                             multi_progress.add_worker(
-                                task_id, f"Tarea {task_id}", total=total
+                                nucleo_id, f"Nucleo {nucleo_id}", total=total
                             )
-                        multi_progress.update_worker(task_id, current)
+                        multi_progress.update_worker(nucleo_id, current)
                     if done_count == total_combinations:
                         break
                     time.sleep(0.5)
                 multi_progress.stop()
 
-                # Se recogen los resultados de cada tarea conforme van terminando
                 for future in as_completed(futures):
                     result_backtest = future.result()
                     results.append(result_backtest)
 
-        # Se determina el mejor resultado basándose en el "Win Rate [%]"
+        # Selección del mejor resultado basado en "Win Rate [%]"
         best_backtest_result = None
         best_win_rate = -float("inf")
         best_params = None
@@ -130,7 +126,11 @@ class OptimizationEngine:
                 best_backtest_result = res
                 best_params = res["optimized_params"]
 
-        # Una vez obtenida la mejor combinación, se realiza un backtest final con salida completa
+        # Imprimir la combinación de parámetros que se usará para el backtest final
+        print("\nBacktest final - Mejor combinación de parámetros:")
+        print(best_params)
+
+        # Backtest final con salida completa usando una barra de progreso individual
         final_engine = OptimizationEngine(self.config, preprocessed_data)
         final_strategy_signal = self.config.strategy_signal_class(preprocessed_data)
         final_strategy_signal.set_optimized_params(best_params)
@@ -163,25 +163,32 @@ class OptimizationEngine:
         input_data: pd.DataFrame,
         strategy_signal,
         full_output=False,
-        task_id=None,
+        nucleo_id=None,
         progress_updates=None,
     ) -> dict:
         symbol_points_mapping = self._build_symbol_points_mapping(input_data)
         self._init_managers(symbol_points_mapping)
         self.equity_over_time.clear()
 
-        # Preparar datos
         all_dates, filled_data, signals = self._prepare_data(
             input_data, lambda df: strategy_signal
         )
         symbol_lengths = {symbol: arr.shape[0] for symbol, arr in filled_data.items()}
 
         total_steps = len(all_dates)
-        # Inicializa el progreso para esta tarea, si se ha proporcionado el diccionario compartido
-        if progress_updates is not None and task_id is not None:
-            progress_updates[task_id] = {"progress": 0, "total": total_steps}
+        # Si estamos en modo optimización, muestreamos la evolución para evitar muchos appends
+        if progress_updates is not None and nucleo_id is not None:
+            progress_updates[nucleo_id] = {"progress": 0, "total": total_steps}
+            # Definimos un intervalo de muestreo (por ejemplo, cada 100 pasos)
+            sample_interval = max(1, total_steps // 1000)
+        else:
+            from backtest.utils.progress import BarProgress
 
-        # Bucle principal: iterar sobre cada vela
+            local_progress = BarProgress(
+                total_steps, description="Final Backtest Progress"
+            )
+
+        # En modo optimización, no se guarda toda la serie, solo se muestrea
         for i, date in enumerate(all_dates):
             current_prices = {
                 symbol: arr[i]
@@ -204,12 +211,35 @@ class OptimizationEngine:
                     date,
                 )
 
-            self._update_equity(current_prices, date)
-            # Actualizamos el progreso de esta tarea
-            if progress_updates is not None and task_id is not None:
-                progress_updates[task_id] = {"progress": i + 1, "total": total_steps}
+            if full_output:
+                # En modo final se guarda todo
+                self._update_equity(current_prices, date)
+            else:
+                # Modo optimización: se almacena solo cada sample_interval (o el último)
+                if i % sample_interval == 0 or i == total_steps - 1:
+                    # Guardamos una versión “ligera” sin copiar información extra
+                    balance = self.strategy_manager.get_balance()
+                    equity = self._calculate_equity(
+                        self.strategy_manager.get_positions(), current_prices, balance
+                    )
+                    self.equity_over_time.append(
+                        {
+                            "date": date,
+                            "equity": equity,
+                            "balance": balance,
+                            "open_trades": 0,
+                            "open_lots": 0,
+                        }
+                    )
 
-        # Cálculo de estadísticas
+            if progress_updates is not None and nucleo_id is not None:
+                progress_updates[nucleo_id] = {"progress": i + 1, "total": total_steps}
+            else:
+                local_progress.update(i + 1)
+
+        if progress_updates is None or nucleo_id is None:
+            local_progress.stop()
+
         statistics_calculator = Statistics(
             self.strategy_manager.get_results(),
             self.equity_over_time,
@@ -230,8 +260,7 @@ class OptimizationEngine:
             stats_copy = copy.deepcopy(stats)
             return {"statistics": stats_copy}
 
-    # ------------------- Funciones Auxiliares ------------------- #
-
+    # Funciones auxiliares
     def _build_symbol_points_mapping(self, input_data: pd.DataFrame) -> dict:
         symbol_mapping = {}
         for symbol, group in input_data.groupby("Symbol"):
@@ -254,11 +283,9 @@ class OptimizationEngine:
         grouped_data = input_data.groupby("Symbol")
         filled_data = {}
         signal_generators = {}
-
         for symbol, group in grouped_data:
             filled_data[symbol] = group["Open"].values
             signal_generators[symbol] = strategy_signal_factory(group)
-
         return all_dates, filled_data, signal_generators
 
     def _update_equity(self, current_prices: dict, date: datetime):
@@ -267,7 +294,6 @@ class OptimizationEngine:
         equity = self._calculate_equity(positions, current_prices, balance)
         open_trades = len(positions)
         open_lots = sum(pos["lot_size"] for pos in positions.values())
-
         self.equity_over_time.append(
             {
                 "date": date,
@@ -283,32 +309,25 @@ class OptimizationEngine:
     ) -> float:
         symbol_points_map = self.strategy_manager.symbol_points_mapping
         equity = balance
-
         for pos in positions.values():
             symbol = pos["symbol"]
             cp = current_prices.get(symbol, 0)
             if cp == 0:
                 continue
-
             point = symbol_points_map[symbol]["point"]
             tick_value = symbol_points_map[symbol]["tick_value"]
-
             if pos["position"] == "long":
                 price_diff = cp - pos["entry_price"]
             else:
                 price_diff = pos["entry_price"] - cp
-
             floating_profit = (price_diff / point) * tick_value * pos["lot_size"]
             equity += floating_profit
-
         return equity
 
 
 # Función auxiliar para ejecución en paralelo.
-# Recibe una tupla con (config, input_data, params_dict, full_output, task_id, progress_updates),
-# crea una instancia nueva del motor, establece los parámetros optimizados y ejecuta el backtest.
 def _run_single_backtest_parallel(args):
-    config, input_data, params_dict, full_output, task_id, progress_updates = args
+    config, input_data, params_dict, full_output, nucleo_id, progress_updates = args
     engine = OptimizationEngine(config, input_data)
     strategy_signal = config.strategy_signal_class(input_data)
     strategy_signal.set_optimized_params(params_dict)
@@ -316,7 +335,7 @@ def _run_single_backtest_parallel(args):
         input_data,
         strategy_signal,
         full_output=full_output,
-        task_id=task_id,
+        nucleo_id=nucleo_id,
         progress_updates=progress_updates,
     )
     result["optimized_params"] = params_dict

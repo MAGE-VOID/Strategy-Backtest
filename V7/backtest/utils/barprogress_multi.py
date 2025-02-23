@@ -8,6 +8,7 @@ from rich.progress import (
 )
 import time
 
+
 class MultiProgress:
     def __init__(self, total_tasks: int):
         self.progress = Progress(
@@ -19,11 +20,14 @@ class MultiProgress:
             refresh_per_second=1,
         )
         self.total_tasks = total_tasks
-        self.overall_task_id = self.progress.add_task("Overall Progress", total=total_tasks)
-        # Guardaremos el mapping: task_id (nuestra clave asignada a cada tarea) -> progress bar task id (interno de rich)
+        self.overall_task_id = self.progress.add_task(
+            "Overall Progress", total=total_tasks
+        )
+        # Mapping de nucleo_id -> id de tarea en rich
         self.worker_tasks = {}
 
     def add_worker(self, worker_id: int, description: str, total: int):
+        # Se agrega o reinicia la barra para el nucleo indicado
         task_id = self.progress.add_task(description, total=total, visible=True)
         self.worker_tasks[worker_id] = task_id
 
