@@ -4,6 +4,10 @@ import pandas as pd
 import copy
 from datetime import datetime
 from itertools import product
+from concurrent.futures import (
+    ProcessPoolExecutor,
+    as_completed,
+)  # Se agrega para paralelización
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.utils.progress import BarProgress
@@ -53,6 +57,48 @@ class OptimizationEngine:
                 )
         return list(product(*param_values))
 
+    def run_optimization(self):
+        # Se crea una instancia de la señal para obtener los parámetros de optimización
+        strategy_signal = self.config.strategy_signal_class(self.input_data)
+        optimization_params = strategy_signal.optimization_params
+
+        param_combinations = self.generate_combinations(optimization_params)
+        print(f"\nTotal de combinaciones de parámetros: {len(param_combinations)}\n")
+
+        preprocessed_data = self._preprocess_data(self.input_data.copy())
+
+        results = []
+        # Se usa ProcessPoolExecutor para ejecutar en paralelo hasta 4 núcleos
+        with ProcessPoolExecutor(max_workers=4) as executor:
+            futures = []
+            for param_values in param_combinations:
+                params_dict = dict(zip(optimization_params.keys(), param_values))
+                futures.append(
+                    executor.submit(
+                        _run_single_backtest_parallel,
+                        (self.config, preprocessed_data, params_dict),
+                    )
+                )
+            # Se recogen los resultados de cada tarea conforme van terminando
+            for future in as_completed(futures):
+                result_backtest = future.result()
+                results.append(result_backtest)
+
+        # Se determina el mejor resultado basándose en el "Win Rate [%]"
+        best_backtest_result = None
+        best_win_rate = -float("inf")
+        for res in results:
+            win_rate = res["statistics"].get("Win Rate [%]", 0)
+            if win_rate > best_win_rate:
+                best_win_rate = win_rate
+                best_backtest_result = res
+
+        return {
+            "trades": best_backtest_result["trades"],
+            "equity_over_time": best_backtest_result["equity_over_time"],
+            "statistics": best_backtest_result["statistics"],
+        }
+
     def update_best_result(self, result_backtest: dict) -> dict:
         stats = result_backtest["statistics"]
         if not isinstance(stats, dict):
@@ -70,33 +116,6 @@ class OptimizationEngine:
 
         return self.best_result
 
-    def run_optimization(self):
-        strategy_signal = self.config.strategy_signal_class(self.input_data)
-        optimization_params = strategy_signal.optimization_params
-
-        param_combinations = self.generate_combinations(optimization_params)
-        print(f"\nTotal de combinaciones de parámetros: {len(param_combinations)}\n")
-
-        preprocessed_data = self._preprocess_data(self.input_data.copy())
-
-        best_backtest_result = None
-
-        for idx, param_values in enumerate(param_combinations, start=1):
-            print(f"Combinación {idx}: {param_values}")
-            params_dict = dict(zip(optimization_params.keys(), param_values))
-            strategy_signal.set_optimized_params(params_dict)
-
-            result_backtest = self._run_single_backtest(
-                preprocessed_data, strategy_signal
-            )
-            best_backtest_result = self.update_best_result(result_backtest)
-
-        return {
-            "trades": best_backtest_result["trades"],
-            "equity_over_time": best_backtest_result["equity_over_time"],
-            "statistics": best_backtest_result["statistics"],
-        }
-
     def _run_single_backtest(self, input_data: pd.DataFrame, strategy_signal) -> dict:
         symbol_points_mapping = self._build_symbol_points_mapping(input_data)
         self._init_managers(symbol_points_mapping)
@@ -112,7 +131,7 @@ class OptimizationEngine:
         progress_bar = BarProgress(total_steps)
         progress_current = 0
 
-        # Iteramos cada vela
+        # Bucle principal: iterar sobre cada vela
         for i, date in enumerate(all_dates):
             current_prices = {
                 symbol: arr[i]
@@ -122,7 +141,7 @@ class OptimizationEngine:
             if not current_prices:
                 continue
 
-            # Para cada símbolo, generamos señales y aplicamos la estrategia
+            # Para cada símbolo se generan señales y se aplica la estrategia
             for symbol, price in current_prices.items():
                 signal_buy, signal_sell = signals[symbol].generate_signals_for_candle(i)
                 self.strategy_manager.manage_tp_sl(symbol, price, date)
@@ -136,16 +155,16 @@ class OptimizationEngine:
                     date,
                 )
 
-            # Actualizamos la equidad
+            # Actualización de la equidad
             self._update_equity(current_prices, date)
 
-            # Barra de progreso
+            # Actualización de la barra de progreso
             progress_current += 1
             progress_bar.update(progress_current + 1)
 
         progress_bar.stop()
 
-        # Calcular estadísticas
+        # Cálculo de estadísticas
         statistics_calculator = Statistics(
             self.strategy_manager.get_results(),
             self.equity_over_time,
@@ -218,11 +237,13 @@ class OptimizationEngine:
     ) -> float:
         symbol_points_map = self.strategy_manager.symbol_points_mapping
         equity = balance
+
         for pos in positions.values():
             symbol = pos["symbol"]
             cp = current_prices.get(symbol, 0)
             if cp == 0:
                 continue
+
             point = symbol_points_map[symbol]["point"]
             tick_value = symbol_points_map[symbol]["tick_value"]
 
@@ -233,4 +254,17 @@ class OptimizationEngine:
 
             floating_profit = (price_diff / point) * tick_value * pos["lot_size"]
             equity += floating_profit
+
         return equity
+
+
+# Función auxiliar para ejecución en paralelo.
+# Recibe una tupla con (config, input_data, params_dict), crea una instancia nueva del motor,
+# establece los parámetros optimizados y ejecuta el backtest.
+def _run_single_backtest_parallel(args):
+    config, input_data, params_dict = args
+    engine = OptimizationEngine(config, input_data)
+    strategy_signal = config.strategy_signal_class(input_data)
+    strategy_signal.set_optimized_params(params_dict)
+    result = engine._run_single_backtest(input_data, strategy_signal)
+    return result
