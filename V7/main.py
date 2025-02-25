@@ -47,4 +47,3 @@ if __name__ == "__main__":
     print(stats_df)
 
     plot_equity_balance(result_backtest)
-    
