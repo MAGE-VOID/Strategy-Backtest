@@ -11,6 +11,7 @@ from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.utils.barprogress_multi import MultiProgress
 from backtest.algorithm.parameter_combinations import generate_combinations
+from backtest.algorithm.metric_config import select_best_result
 
 
 class OptimizationEngine:
@@ -21,8 +22,6 @@ class OptimizationEngine:
     def __init__(self, config, input_data: pd.DataFrame):
         self.config = config
         self.input_data = input_data
-        self.best_result = None
-        self.best_stats = None
         self.equity_over_time = []
 
     def run_optimization(self):
@@ -85,16 +84,8 @@ class OptimizationEngine:
                     result_backtest = future.result()
                     results.append(result_backtest)
 
-        # Selección del mejor resultado basado en "Win Rate [%]"
-        best_backtest_result = None
-        best_win_rate = -float("inf")
-        best_params = None
-        for res in results:
-            win_rate = res["statistics"].get("Win Rate [%]", 0)
-            if win_rate > best_win_rate:
-                best_win_rate = win_rate
-                best_backtest_result = res
-                best_params = res["optimized_params"]
+        best_backtest_result = select_best_result(results)
+        best_params = best_backtest_result.get("optimized_params", {})
 
         # Imprimir la combinación de parámetros que se usará para el backtest final
         print("\nBacktest final - Mejor combinación de parámetros:")
@@ -110,23 +101,6 @@ class OptimizationEngine:
         final_result["optimized_params"] = best_params
 
         return final_result
-
-    def update_best_result(self, result_backtest: dict) -> dict:
-        stats = result_backtest["statistics"]
-        if not isinstance(stats, dict):
-            print("Error: las estadísticas no están en formato diccionario.")
-            return self.best_result
-
-        win_rate = stats.get("Win Rate [%]", 0)
-        if self.best_result is None or win_rate > self.best_stats:
-            self.best_result = {
-                "trades": result_backtest["trades"],
-                "equity_over_time": result_backtest["equity_over_time"],
-                "statistics": result_backtest["statistics"],
-            }
-            self.best_stats = win_rate
-
-        return self.best_result
 
     def _run_single_backtest(
         self,
@@ -146,10 +120,8 @@ class OptimizationEngine:
         symbol_lengths = {symbol: arr.shape[0] for symbol, arr in filled_data.items()}
 
         total_steps = len(all_dates)
-        # Si estamos en modo optimización, muestreamos la evolución para evitar muchos appends
         if progress_updates is not None and nucleo_id is not None:
             progress_updates[nucleo_id] = {"progress": 0, "total": total_steps}
-            # Definimos un intervalo de muestreo (por ejemplo, cada 100 pasos)
             sample_interval = max(1, total_steps // 1000)
         else:
             from backtest.utils.progress import BarProgress
@@ -182,12 +154,9 @@ class OptimizationEngine:
                 )
 
             if full_output:
-                # En modo final se guarda todo
                 self._update_equity(current_prices, date)
             else:
-                # Modo optimización: se almacena solo cada sample_interval (o el último)
                 if i % sample_interval == 0 or i == total_steps - 1:
-                    # Guardamos una versión “ligera” sin copiar información extra
                     balance = self.strategy_manager.get_balance()
                     equity = self._calculate_equity(
                         self.strategy_manager.get_positions(), current_prices, balance
