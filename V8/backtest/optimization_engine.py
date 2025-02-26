@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 import copy
 from datetime import datetime
-from itertools import product
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
 import time
@@ -87,7 +86,6 @@ class OptimizationEngine:
         best_backtest_result = select_best_result(results)
         best_params = best_backtest_result.get("optimized_params", {})
 
-        # Imprimir la combinación de parámetros que se usará para el backtest final
         print("\nBacktest final - Mejor combinación de parámetros:")
         print(best_params)
 
