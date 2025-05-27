@@ -23,7 +23,7 @@ class BacktestEngine:
         if self.config.mode == "optimization":
             optimization_engine = OptimizationEngine(self.config, input_data)
             return optimization_engine.run_optimization()
-        else:
+        if self.config.mode == "single":
             return self._run_single_backtest(input_data)
 
     def _run_single_backtest(self, input_data: pd.DataFrame) -> dict:

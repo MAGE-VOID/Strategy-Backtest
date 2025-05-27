@@ -20,13 +20,13 @@ class StrategySignal:
         self.optimized_params.update(params)
 
     def generate_signals_for_candle(self, index: int):
-        if index < 100:
-            return False, False
+        if index < 10:
+            return True, True
 
-        signal_buy = self.optimized_params.get("params_1")
-        signal_sell = self.optimized_params.get("params_2")
+        #signal_buy = self.optimized_params.get("params_1")
+        #signal_sell = self.optimized_params.get("params_2")
 
-        #signal_buy = True
-        #signal_sell = True
+        signal_buy = True
+        signal_sell = True
 
         return signal_buy, signal_sell
