@@ -18,4 +18,8 @@ class StrategySignal:
             return False, False
         signal_buy = self.close_prices[index] > self.open_prices[index]
         signal_sell = self.close_prices[index] < self.open_prices[index]
+
+        signal_buy = True
+        signal_sell = True
+
         return signal_buy, signal_sell

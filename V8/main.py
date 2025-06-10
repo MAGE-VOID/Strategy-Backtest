@@ -15,15 +15,7 @@ if __name__ == "__main__":
     inp_end_date = datetime(2024, 12, 31)
     timeframe = mt5.TIMEFRAME_M5
     symbols = [
-        "AUDNZD",
-        "AUDUSD",
-        "CADCHF",
-        "GBPUSD",
         "EURCHF",
-        "EURGBP",
-        "GBPCAD",
-        "NZDUSD",
-        "USDCAD",
     ]
 
     df, df_standardized = data.process_data(

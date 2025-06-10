@@ -15,15 +15,7 @@ inp_end_date = datetime(2024, 12, 31)
 timeframe = mt5.TIMEFRAME_M5  # M1, M5, M10, M15, M30, H1, H4, D1, W1
 # Definir símbolos
 symbols = [
-    "AUDNZD",
-    "AUDUSD",
-    "CADCHF",
-    "GBPUSD",
     "EURCHF",
-    "EURGBP",
-    "GBPCAD",
-    "NZDUSD",
-    "USDCAD",
 ]
 
 df, df_standardized = CL.process_data(inp_start_date, inp_end_date, symbols, timeframe)
