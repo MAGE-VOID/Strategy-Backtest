@@ -5,7 +5,7 @@ import subprocess
 
 # Constantes globales
 SEPARADOR = "=" * 50
-ESPACIO_SIN_SEPARACION = "\u00A0"  # Carácter de espacio sin separación
+ESPACIO_SIN_SEPARACION = "\u00a0"  # Carácter de espacio sin separación
 
 
 def get_ignore_files(extra_files=None):
