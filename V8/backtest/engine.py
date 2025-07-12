@@ -8,12 +8,7 @@ from backtest.config import BacktestConfig
 from backtest.utils.progress import BarProgress
 from backtest.optimization_engine import OptimizationEngine
 
-
 class BacktestEngine:
-    """
-    Motor del backtest que utiliza un objeto de configuración para centralizar parámetros.
-    """
-
     def __init__(self, config: BacktestConfig):
         self.config = config
         self.strategy_manager = None
@@ -21,157 +16,178 @@ class BacktestEngine:
 
     def run_backtest(self, input_data: pd.DataFrame) -> dict:
         if self.config.mode == "optimization":
-            optimization_engine = OptimizationEngine(self.config, input_data)
-            return optimization_engine.run_optimization()
-        if self.config.mode == "single":
-            return self._run_single_backtest(input_data)
+            return OptimizationEngine(self.config, input_data).run_optimization()
+        return self._run_single_backtest(input_data)
 
     def _run_single_backtest(self, input_data: pd.DataFrame) -> dict:
-        input_data = self._preprocess_data(input_data)
+        df = input_data.sort_index()
+        dates   = df.index.unique()
+        symbols = df["Symbol"].unique()
+        n_steps = len(dates)
+        n_sym   = symbols.size
 
-        symbol_points_mapping = self._build_symbol_points_mapping(input_data)
-        self._init_managers(symbol_points_mapping)
-        self.equity_over_time.clear()
+        # --- 1) Matrices OHLC ---
+        open_mat  = np.zeros((n_steps, n_sym), dtype=float)
+        high_mat  = np.zeros((n_steps, n_sym), dtype=float)
+        low_mat   = np.zeros((n_steps, n_sym), dtype=float)
+        close_mat = np.zeros((n_steps, n_sym), dtype=float)
 
-        all_dates, filled_data, signals = self._prepare_data(
-            input_data, self.config.strategy_signal_class
-        )
-        if signals is None:
-            raise ValueError("No se proporcionó una clase para generar señales.")
+        buy_signals  = np.zeros((n_steps, n_sym), dtype=bool)
+        sell_signals = np.zeros((n_steps, n_sym), dtype=bool)
 
-        symbol_lengths = {symbol: arr.shape[0] for symbol, arr in filled_data.items()}
-        total_steps = len(all_dates)
-        prev_trade_count = 0
+        # Para mapear señales a índice global
+        dates_idx = {dt:i for i, dt in enumerate(dates)}
 
-        progress_bar = BarProgress(total_steps)
-        progress_current = 0
+        # --- 2) Rellenar matrices y señales ---
+        for j, sym in enumerate(symbols):
+            grp = df[df["Symbol"] == sym]
+            # Alineamos con reindex para no saltar fechas
+            ser_o = grp["Open"].reindex(dates).fillna(0)
+            ser_h = grp["High"].reindex(dates).fillna(0)
+            ser_l = grp["Low"].reindex(dates).fillna(0)
+            ser_c = grp["Close"].reindex(dates).fillna(0)
+            open_mat[:,j]  = ser_o.values
+            high_mat[:,j]  = ser_h.values
+            low_mat[:,j]   = ser_l.values
+            close_mat[:,j] = ser_c.values
 
-        # Bucle principal del backtest
-        for i, date in enumerate(all_dates):
-            current_prices = {
-                symbol: arr[i]
-                for symbol, arr in filled_data.items()
-                if i < symbol_lengths[symbol]
+            # señales: generador usa sólo los índices locales de grp
+            gen = self.config.strategy_signal_class(grp)
+            for local_i, dt in enumerate(grp.index):
+                gi = dates_idx.get(dt, -1)
+                if gi < 0: continue
+                b, s = gen.generate_signals_for_candle(local_i)
+                buy_signals[gi, j]  = b
+                sell_signals[gi, j] = s
+
+        # --- 3) Punto/Tick mapping ---
+        symbol_points = {
+            sym: {
+                "point": grp["Point"].iat[0],
+                "tick_value": grp["Tick_Value"].iat[0]
             }
-            if not current_prices:
-                continue
-
-            for symbol, price in current_prices.items():
-                signal_buy, signal_sell = signals[symbol].generate_signals_for_candle(i)
-                self.strategy_manager.manage_tp_sl(symbol, price, date)
-                self.strategy_manager.apply_strategy(
-                    self.config.strategy_name,
-                    symbol,
-                    signal_buy,
-                    signal_sell,
-                    price,
-                    i,
-                    date,
-                )
-
-            self._update_equity(current_prices, date)
-
-            if self.config.debug_mode == "realtime":
-                results = self.strategy_manager.get_results()
-                current_trade_count = len(results)
-                if current_trade_count > prev_trade_count:
-                    for trade in results[prev_trade_count:]:
-                        print(trade)
-                    prev_trade_count = current_trade_count
-
-            progress_current += 1
-            progress_bar.update(progress_current + 1)
-
-        progress_bar.stop()
-
-        if self.config.debug_mode == "final":
-            self._debug_positions()
-
-        statistics_calculator = Statistics(
-            self.strategy_manager.get_results(),
-            self.equity_over_time,
-            self.config.initial_balance,
-        )
-        stats = statistics_calculator.calculate_statistics()
-
-        return {
-            "trades": self.strategy_manager.get_results(),
-            "equity_over_time": self.equity_over_time,
-            "statistics": stats,
+            for sym, grp in df.groupby("Symbol")
         }
 
-    def _build_symbol_points_mapping(self, input_data: pd.DataFrame) -> dict:
-        symbol_mapping = {}
-        for symbol, group in input_data.groupby("Symbol"):
-            point = group["Point"].iloc[0]
-            tick_value = group["Tick_Value"].iloc[0]
-            symbol_mapping[symbol] = {"point": point, "tick_value": tick_value}
-        return symbol_mapping
+        # --- 4) Iniciar EntryManager y parche open_position para meta-info ---
+        em = EntryManager(self.config.initial_balance,
+                          symbol_points_mapping=symbol_points)
+        pm = em.position_manager
+        self.strategy_manager = em
 
-    def _init_managers(self, symbol_points_mapping: dict):
-        self.strategy_manager = EntryManager(
-            self.config.initial_balance, symbol_points_mapping=symbol_points_mapping
-        )
+        sym2idx = {sym:i for i, sym in enumerate(symbols)}
+        orig_open = pm.open_position
 
-    def _preprocess_data(self, input_data: pd.DataFrame) -> pd.DataFrame:
-        input_data.sort_index(inplace=True)
-        return input_data
+        def open_with_meta(symbol, position_type, price, lot_size, sl=None, tp=None, open_date=None):
+            orig_open(symbol, position_type, price, lot_size, sl, tp, open_date)
+            ticket = pm.ticket_counter - 1
+            pos    = pm.positions[ticket]
+            j      = sym2idx[symbol]
+            meta   = symbol_points[symbol]
+            pos.update({
+                "sym_idx": j,
+                "point":   meta["point"],
+                "tick":    meta["tick_value"],
+                "dir":     1 if position_type=="long" else -1
+            })
+            pm.results[-1].update({
+                "sym_idx": j,
+                "point":   meta["point"],
+                "tick":    meta["tick_value"],
+                "dir":     pos["dir"]
+            })
 
-    def _prepare_data(self, input_data: pd.DataFrame, strategy_signal_class):
-        all_dates = input_data.index.unique()
-        grouped_data = input_data.groupby("Symbol")
-        filled_data = {}
-        signal_generators = {} if strategy_signal_class else None
+        pm.open_position = open_with_meta
 
-        for symbol, group in grouped_data:
-            filled_data[symbol] = group["Open"].values
-            if strategy_signal_class:
-                signal_generators[symbol] = strategy_signal_class(group)
+        manage_tp_sl = em.manage_tp_sl
+        apply_strat  = em.apply_strategy
 
-        return all_dates, filled_data, signal_generators
+        equity_arr  = np.empty(n_steps, dtype=float)
+        balance_arr = np.empty(n_steps, dtype=float)
+        open_trds   = np.empty(n_steps, dtype=int)
+        open_lots   = np.empty(n_steps, dtype=float)
 
-    def _update_equity(self, current_prices: dict, date: datetime):
-        positions = self.strategy_manager.get_positions()
-        balance = self.strategy_manager.get_balance()
-        equity = self._calculate_equity(positions, current_prices, balance)
-        open_trades = len(positions)
-        open_lots = sum(pos["lot_size"] for pos in positions.values())
+        progress = BarProgress(n_steps)
 
-        self.equity_over_time.append(
-            {
-                "date": date,
-                "equity": equity,
-                "balance": balance,
-                "open_trades": open_trades,
-                "open_lots": open_lots,
-            }
-        )
+        # --- 5) Bucle principal: cada vela una vez ---
+        for i, date in enumerate(dates):
+            opens  = open_mat[i]
+            highs  = high_mat[i]
+            lows   = low_mat[i]
+            closes = close_mat[i]
+            buys   = buy_signals[i]
+            sells  = sell_signals[i]
 
-    def _calculate_equity(
-        self, positions: dict, current_prices: dict, balance: float
-    ) -> float:
-        symbol_points_map = self.strategy_manager.symbol_points_mapping
-        equity = balance
+            # a) señales + gestión TP/SL en la apertura
+            for j, sym in enumerate(symbols):
+                price_o = opens[j]
+                if price_o == 0: 
+                    continue
+                manage_tp_sl(sym, price_o, date)
+                apply_strat(self.config.strategy_name,
+                            sym,
+                            bool(buys[j]),
+                            bool(sells[j]),
+                            price_o, i, date)
 
-        for pos in positions.values():
-            symbol = pos["symbol"]
-            cp = current_prices.get(symbol, 0)
-            if cp == 0:
-                continue
+            # b) **intrabar**: chequeo de extremos para cerrar stops y take-profits
+            #   sólo primera vez que toca cualquiera de los dos
+            for ticket, pos in list(pm.positions.items()):
+                sym = pos["symbol"]
+                j   = pos["sym_idx"]
+                tp  = pos.get("tp", None)
+                sl  = pos.get("sl", None)
+                if pos["position"]=="long":
+                    # si toca primero el SL o el TP
+                    if sl is not None and lows[j] <= sl:
+                        pm.close_position(ticket, sl, date)
+                        continue
+                    if tp is not None and highs[j] >= tp:
+                        pm.close_position(ticket, tp, date)
+                else:  # short
+                    if sl is not None and highs[j] >= sl:
+                        pm.close_position(ticket, sl, date)
+                        continue
+                    if tp is not None and lows[j] <= tp:
+                        pm.close_position(ticket, tp, date)
 
-            point = symbol_points_map[symbol]["point"]
-            tick_value = symbol_points_map[symbol]["tick_value"]
+            # c) calcular equity real-time
+            bal = pm.balance
+            eq  = bal
+            lots = 0
+            for pos in pm.positions.values():
+                j   = pos["sym_idx"]
+                cp  = closes[j]
+                if cp == 0:
+                    continue
+                diff = pos["dir"] * (cp - pos["entry_price"])
+                eq  += (diff / pos["point"]) * pos["tick"] * pos["lot_size"]
+                lots += pos["lot_size"]
 
-            if pos["position"] == "long":
-                price_diff = cp - pos["entry_price"]
-            else:
-                price_diff = pos["entry_price"] - cp
+            equity_arr[i]  = eq
+            balance_arr[i] = bal
+            open_trds[i]   = len(pm.positions)
+            open_lots[i]   = lots
 
-            floating_profit = (price_diff / point) * tick_value * pos["lot_size"]
-            equity += floating_profit
+            progress.update(i+1)
+        progress.stop()
 
-        return equity
+        # --- 6) Resultados y estadísticas ---
+        df_out = pd.DataFrame({
+            "date":        dates,
+            "equity":      equity_arr,
+            "balance":     balance_arr,
+            "open_trades": open_trds,
+            "open_lots":   open_lots
+        })
+        self.equity_over_time = df_out.to_dict("records")
 
-    def _debug_positions(self):
-        for trade in self.strategy_manager.get_results():
-            print(trade)
+        stats = Statistics(pm.results,
+                           self.equity_over_time,
+                           self.config.initial_balance).calculate_statistics()
+
+        return {
+            "trades":           pm.results,
+            "equity_over_time": self.equity_over_time,
+            "statistics":       stats,
+        }
