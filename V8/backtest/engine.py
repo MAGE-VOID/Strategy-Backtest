@@ -205,6 +205,3 @@ class BacktestEngine:
             "equity_over_time": self.equity_over_time,
             "statistics": stats,
         }
-
-
-#
