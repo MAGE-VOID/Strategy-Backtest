@@ -16,8 +16,8 @@ if __name__ == "__main__":
     timeframe = mt5.TIMEFRAME_M5
     symbols = [
         "EURCHF",
-        "EURUSD",
-        "GBPUSD",
+        #"EURUSD",
+        #"GBPUSD",
     ]
 
     df, df_standardized = data.process_data(

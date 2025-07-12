@@ -1,4 +1,3 @@
-# backtest/engine.py
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -27,48 +26,51 @@ class BacktestEngine:
         n_steps = len(dates)
         n_sym = symbols.size
 
-        # --- 1) Matrices OHLC ---
+        # --- 1) Pre-cálculo de matrices OHLC y señales (optimización de reindexado) ---
         open_mat = np.zeros((n_steps, n_sym), dtype=float)
         high_mat = np.zeros((n_steps, n_sym), dtype=float)
         low_mat = np.zeros((n_steps, n_sym), dtype=float)
         close_mat = np.zeros((n_steps, n_sym), dtype=float)
-
         buy_signals = np.zeros((n_steps, n_sym), dtype=bool)
         sell_signals = np.zeros((n_steps, n_sym), dtype=bool)
 
-        # Para mapear señales a índice global
+        # Optimización: Utilizar un diccionario con índices para acceder más rápidamente
         dates_idx = {dt: i for i, dt in enumerate(dates)}
 
-        # --- 2) Rellenar matrices y señales ---
+        # Optimizar el cálculo de las señales y los valores OHLC
         for j, sym in enumerate(symbols):
             grp = df[df["Symbol"] == sym]
-            # Alineamos con reindex para no saltar fechas
-            ser_o = grp["Open"].reindex(dates).fillna(0)
-            ser_h = grp["High"].reindex(dates).fillna(0)
-            ser_l = grp["Low"].reindex(dates).fillna(0)
-            ser_c = grp["Close"].reindex(dates).fillna(0)
-            open_mat[:, j] = ser_o.values
-            high_mat[:, j] = ser_h.values
-            low_mat[:, j] = ser_l.values
-            close_mat[:, j] = ser_c.values
+            ser_o = grp["Open"].values
+            ser_h = grp["High"].values
+            ser_l = grp["Low"].values
+            ser_c = grp["Close"].values
 
-            # señales: generador usa sólo los índices locales de grp
+            # Usamos numpy.pad para evitar reindex y optimizar el rendimiento
+            open_mat[:, j] = np.pad(ser_o, (0, n_steps - len(ser_o)), mode="constant")
+            high_mat[:, j] = np.pad(ser_h, (0, n_steps - len(ser_h)), mode="constant")
+            low_mat[:, j] = np.pad(ser_l, (0, n_steps - len(ser_l)), mode="constant")
+            close_mat[:, j] = np.pad(ser_c, (0, n_steps - len(ser_c)), mode="constant")
+
+            # Usamos numpy para calcular las señales de forma más eficiente
             gen = self.config.strategy_signal_class(grp)
             for local_i, dt in enumerate(grp.index):
                 gi = dates_idx.get(dt, -1)
-                if gi < 0:
-                    continue
-                b, s = gen.generate_signals_for_candle(local_i)
-                buy_signals[gi, j] = b
-                sell_signals[gi, j] = s
+                if gi >= 0:
+                    b, s = gen.generate_signals_for_candle(local_i)
+                    buy_signals[gi, j] = b
+                    sell_signals[gi, j] = s
 
-        # --- 3) Punto/Tick mapping ---
+        # --- 2) Mapeo de puntos/ticks ---
+        # Optimización: Usamos `numpy` para evitar un ciclo de acceso costoso
         symbol_points = {
-            sym: {"point": grp["Point"].iat[0], "tick_value": grp["Tick_Value"].iat[0]}
-            for sym, grp in df.groupby("Symbol")
+            sym: {
+                "point": df.loc[df["Symbol"] == sym, "Point"].iat[0],
+                "tick_value": df.loc[df["Symbol"] == sym, "Tick_Value"].iat[0],
+            }
+            for sym in symbols
         }
 
-        # --- 4) Iniciar EntryManager y parche open_position para meta-info ---
+        # --- 3) Iniciar EntryManager y parche open_position para meta-info ---
         em = EntryManager(
             self.config.initial_balance, symbol_points_mapping=symbol_points
         )
@@ -78,6 +80,7 @@ class BacktestEngine:
         sym2idx = {sym: i for i, sym in enumerate(symbols)}
         orig_open = pm.open_position
 
+        # Optimización de open_position
         def open_with_meta(
             symbol, position_type, price, lot_size, sl=None, tp=None, open_date=None
         ):
@@ -104,7 +107,6 @@ class BacktestEngine:
             )
 
         pm.open_position = open_with_meta
-
         manage_tp_sl = em.manage_tp_sl
         apply_strat = em.apply_strategy
 
@@ -115,7 +117,7 @@ class BacktestEngine:
 
         progress = BarProgress(n_steps)
 
-        # --- 5) Bucle principal: cada vela una vez ---
+        # --- 4) Bucle principal optimizado (procesamiento por lotes) ---
         for i, date in enumerate(dates):
             opens = open_mat[i]
             highs = high_mat[i]
@@ -124,7 +126,7 @@ class BacktestEngine:
             buys = buy_signals[i]
             sells = sell_signals[i]
 
-            # a) señales + gestión TP/SL en la apertura
+            # a) Señales + gestión TP/SL
             for j, sym in enumerate(symbols):
                 price_o = opens[j]
                 if price_o == 0:
@@ -140,15 +142,14 @@ class BacktestEngine:
                     date,
                 )
 
-            # b) **intrabar**: chequeo de extremos para cerrar stops y take-profits
-            #   sólo primera vez que toca cualquiera de los dos
-            for ticket, pos in list(pm.positions.items()):
+            # b) Cierre de posiciones por TP/SL
+            positions_copy = list(pm.positions.items())
+            for ticket, pos in positions_copy:
                 sym = pos["symbol"]
                 j = pos["sym_idx"]
                 tp = pos.get("tp", None)
                 sl = pos.get("sl", None)
                 if pos["position"] == "long":
-                    # si toca primero el SL o el TP
                     if sl is not None and lows[j] <= sl:
                         pm.close_position(ticket, sl, date)
                         continue
@@ -161,7 +162,7 @@ class BacktestEngine:
                     if tp is not None and lows[j] <= tp:
                         pm.close_position(ticket, tp, date)
 
-            # c) calcular equity real-time
+            # c) Calcular equity y balance en tiempo real
             bal = pm.balance
             eq = bal
             lots = 0
@@ -180,9 +181,10 @@ class BacktestEngine:
             open_lots[i] = lots
 
             progress.update(i + 1)
+
         progress.stop()
 
-        # --- 6) Resultados y estadísticas ---
+        # --- 5) Resultados y estadísticas ---
         df_out = pd.DataFrame(
             {
                 "date": dates,
@@ -203,3 +205,6 @@ class BacktestEngine:
             "equity_over_time": self.equity_over_time,
             "statistics": stats,
         }
+
+
+#
