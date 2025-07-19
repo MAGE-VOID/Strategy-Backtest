@@ -5,7 +5,6 @@ from data import custom as data
 from backtest.engine import BacktestEngine
 from backtest.config import BacktestConfig
 from backtest.utils.formatters import format_statistics
-from visualization.plot import plot_equity_balance
 from strategies.signals import StrategySignal
 
 if __name__ == "__main__":
@@ -16,8 +15,8 @@ if __name__ == "__main__":
     inp_end_date = datetime(2024, 12, 31)
     timeframe = mt5.TIMEFRAME_M5
     symbols = [
-        "EURCHF",
-        # "EURUSD",
+        # "EURCHF",
+        "EURUSD",
         # "GBPUSD",
     ]
 
@@ -39,5 +38,3 @@ if __name__ == "__main__":
     stats_df = format_statistics(result_backtest["statistics"])
     print("\n--- Backtest Statistics ---")
     print(stats_df)
-
-    plot_equity_balance(result_backtest)
