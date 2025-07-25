@@ -1,3 +1,5 @@
+# backtest/managers/position_manager.py
+
 from datetime import datetime
 import numpy as np
 
@@ -54,7 +56,6 @@ class PositionManager:
             return
 
         symbol = position["symbol"]
-        # Obtenemos el point y el tick_value
         point = self.symbol_points_mapping[symbol]["point"]
         tick_value = self.symbol_points_mapping[symbol]["tick_value"]
 
@@ -63,15 +64,13 @@ class PositionManager:
         else:  # short
             price_diff = position["entry_price"] - current_price
 
-        # Cálculo de profit en USD
         profit = (price_diff / point) * tick_value * position["lot_size"]
-
         self.balance += profit
 
         self.results.append(
             {
                 "count": self.global_counter + 1,
-                "symbol": position["symbol"],
+                "symbol": symbol,
                 "ticket": ticket,
                 "type": position["position"],
                 "entry": position["entry_price"],
@@ -83,6 +82,35 @@ class PositionManager:
             }
         )
         self.global_counter += 1
+
+    def update_position_tp_sl(self, ticket, tp=None, sl=None):
+        """
+        Actualiza TP y/o SL de una posición abierta (en memoria y en results).
+        """
+        pos = self.positions.get(ticket)
+        if not pos:
+            return
+        if tp is not None:
+            pos["tp"] = tp
+        if sl is not None:
+            pos["sl"] = sl
+
+        # También ajustamos el entry record en results
+        for res in reversed(self.results):
+            if res.get("ticket") == ticket and res.get("status") == "open":
+                if tp is not None:
+                    res["tp"] = tp
+                if sl is not None:
+                    res["sl"] = sl
+                break
+
+    def update_symbol_tp_sl(self, symbol, tp=None, sl=None):
+        """
+        Actualiza TP/SL de todas las posiciones abiertas para un símbolo.
+        """
+        for ticket, pos in self.positions.items():
+            if pos["symbol"] == symbol:
+                self.update_position_tp_sl(ticket, tp, sl)
 
     def get_results(self):
         return self.results
