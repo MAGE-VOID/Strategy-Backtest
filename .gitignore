@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 *.pyo
 *$py.class
+
+# YoYo AI version control directory
+.yoyo/

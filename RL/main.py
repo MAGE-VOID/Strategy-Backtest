@@ -28,7 +28,7 @@ if __name__ == "__main__":
     # Crear la configuración del backtest
     config = BacktestConfig(
         initial_balance=1000,
-        strategy_name="grid_buy",
+        strategy_name="simple_buy",
         strategy_signal_class=StrategySignal,
         debug_mode="none",  # opciones: "none", "final", "realtime"
     )
