@@ -16,7 +16,7 @@ if __name__ == "__main__":
     inp_end_date = datetime(2024, 12, 31)
     timeframe = mt5.TIMEFRAME_M5
     symbols = [
-        "EURCHF",
+        # "EURCHF",
         "EURUSD",
         # "GBPUSD",
     ]

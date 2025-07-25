@@ -16,19 +16,44 @@ class BacktestEngine:
         self.equity_over_time = []
 
     def run_backtest(self, input_data: pd.DataFrame) -> dict:
+        # Paso 1: preparar datos
         df = self._prepare_dataframe(input_data)
         dates, symbols = self._extract_index_symbols(df)
-        matrices = self._init_price_and_signal_matrices(len(dates), len(symbols))
-        self._fill_price_and_signal_matrices(df, dates, symbols, matrices)
+
+        # Paso 2: pre‑llenar matrices de precios (solo OHLC)
+        price_matrices = self._init_price_matrices(len(dates), len(symbols))
+        self._fill_price_matrices(df, dates, symbols, price_matrices)
+
+        # Paso 3: mapping de puntos/tick_value + setup de managers
         symbol_points = self._map_symbol_points(df, symbols)
         em, pm, risk, sym2idx = self._setup_managers(symbol_points, symbols)
+
+        # Paso 4: instanciar generadores de señal y mapeo global→local por símbolo
+        signal_gens = {}
+        local_idx_map = {}
+        for sym in symbols:
+            grp = df[df["Symbol"] == sym]
+            signal_gens[sym] = self.config.strategy_signal_class(grp)
+            # mapa fecha → posición en el array de ese símbolo
+            local_idx_map[sym] = {dt: idx for idx, dt in enumerate(grp.index)}
+
+        # Paso 5: simular barra a barra, consultando la señal en el momento
         results = self._simulate_backtest(
-            dates, symbols, matrices, em, pm, risk, sym2idx
+            dates,
+            symbols,
+            price_matrices,
+            em,
+            pm,
+            risk,
+            sym2idx,
+            signal_gens,
+            local_idx_map,
         )
+
+        # Paso 6: calcular estadísticas
         stats = self._finalize(em, results, symbol_points)
         return stats
 
-    # --- Paso 1: preparar datos ---
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         if df is None or df.empty:
             raise ValueError("No hay datos de mercado para el backtest.")
@@ -39,37 +64,23 @@ class BacktestEngine:
         symbols = df["Symbol"].unique()
         return dates, symbols
 
-    # --- Paso 2: inicializar matrices de precios y señales ---
-    def _init_price_and_signal_matrices(self, n_steps: int, n_sym: int):
+    def _init_price_matrices(self, n_steps: int, n_sym: int):
         shape = (n_steps, n_sym)
         return {
             "open": np.zeros(shape),
             "high": np.zeros(shape),
             "low": np.zeros(shape),
             "close": np.zeros(shape),
-            "buy": np.zeros(shape, dtype=bool),
-            "sell": np.zeros(shape, dtype=bool),
         }
 
-    # --- Paso 3: rellenar matrices con datos y señales ---
-    def _fill_price_and_signal_matrices(self, df, dates, symbols, m):
+    def _fill_price_matrices(self, df, dates, symbols, m):
         dates_idx = {dt: i for i, dt in enumerate(dates)}
         for j, sym in enumerate(symbols):
             grp = df[df["Symbol"] == sym]
             length = len(grp)
             for field in ("Open", "High", "Low", "Close"):
-                arr = grp[field].values
-                m[field.lower()][:length, j] = arr
-            signal_gen = self.config.strategy_signal_class(grp)
-            for local_i, dt in enumerate(grp.index):
-                global_i = dates_idx.get(dt)
-                if global_i is None:
-                    continue
-                b, s = signal_gen.generate_signals_for_candle(local_i)
-                m["buy"][global_i, j] = b
-                m["sell"][global_i, j] = s
+                m[field.lower()][:length, j] = grp[field].values
 
-    # --- Paso 4: obtener puntos/tick_value por símbolo ---
     def _map_symbol_points(self, df, symbols):
         return {
             sym: {
@@ -79,14 +90,13 @@ class BacktestEngine:
             for sym in symbols
         }
 
-    # --- Paso 5: configurar managers ---
     def _setup_managers(self, symbol_points, symbols):
         em = EntryManager(
             self.config.initial_balance, symbol_points_mapping=symbol_points
         )
         pm = em.position_manager
 
-        # Parche para incluir meta-info en cada open_position
+        # Parche para incluir meta‑info en cada open_position
         sym2idx = {sym: i for i, sym in enumerate(symbols)}
         orig_open = pm.open_position
 
@@ -108,13 +118,20 @@ class BacktestEngine:
             pm.results[-1].update(extra)
 
         pm.open_position = open_with_meta
-
         risk = RiskManager(em, pm)
         return em, pm, risk, sym2idx
 
-    # --- Paso 6: bucle principal de simulación ---
     def _simulate_backtest(
-        self, dates, symbols, m, em: EntryManager, pm, risk: RiskManager, sym2idx
+        self,
+        dates,
+        symbols,
+        m,
+        em: EntryManager,
+        pm,
+        risk: RiskManager,
+        sym2idx,
+        signal_gens: dict,
+        local_idx_map: dict,
     ):
         n = len(dates)
         equity = np.empty(n)
@@ -128,52 +145,57 @@ class BacktestEngine:
             h = m["high"][i]
             l = m["low"][i]
             c = m["close"][i]
-            buys = m["buy"][i]
-            sells = m["sell"][i]
 
-            # 1) Cierre por TP/SL
+            # 1) cierres por TP/SL
             risk.check_tp_sl(l, h, symbols, date)
 
-            # 2) Señales de entrada
+            # 2) Señales y aperturas barra a barra
             for j, sym in enumerate(symbols):
                 price_o = o[j]
                 if price_o <= 0:
                     continue
+
+                # traducir global date → índice local en el DataFrame de ese símbolo
+                local_i = local_idx_map[sym].get(date)
+                if local_i is None:
+                    continue
+
+                # generar señal en el momento
+                b, s = signal_gens[sym].generate_signals_for_candle(local_i)
+
                 em.apply_strategy(
                     self.config.strategy_name,
                     sym,
-                    bool(buys[j]),
-                    bool(sells[j]),
+                    bool(b),
+                    bool(s),
                     price_o,
                     i,
                     date,
                 )
 
-            # 3) Cálculo de métricas intradía
+            # 3) snapshot intradía
             eq, bal, cnt, lots = self._compute_equity_balance(pm, c)
             equity[i], balance[i], open_trades[i], open_lots[i] = eq, bal, cnt, lots
 
             progress.update(i + 1)
         progress.stop()
 
-        records = []
-        for dt, eqv, balv, cntv, lotv in zip(
-            dates, equity, balance, open_trades, open_lots
-        ):
-            records.append(
-                {
-                    "date": dt,
-                    "equity": eqv,
-                    "balance": balv,
-                    "open_trades": cntv,
-                    "open_lots": lotv,
-                }
+        # Volcar a lista de records
+        records = [
+            {
+                "date": dt,
+                "equity": eqv,
+                "balance": balv,
+                "open_trades": cntv,
+                "open_lots": lotv,
+            }
+            for dt, eqv, balv, cntv, lotv in zip(
+                dates, equity, balance, open_trades, open_lots
             )
+        ]
         em.equity_over_time = records
-
         return {"records": records, "results": pm.results}
 
-    # --- Paso 7: estadísticas y salida final ---
     def _finalize(self, em: EntryManager, sim_data, symbol_points):
         stats = Statistics(
             em.position_manager.results,
