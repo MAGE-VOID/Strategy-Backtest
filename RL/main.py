@@ -25,12 +25,19 @@ if __name__ == "__main__":
         inp_start_date, inp_end_date, symbols, timeframe
     )
 
-    # Crear la configuración del backtest
     config = BacktestConfig(
         initial_balance=1000,
-        strategy_name="simple_buy",
         strategy_signal_class=StrategySignal,
         debug_mode="none",  # opciones: "none", "final", "realtime"
+        strategies_params={
+            "simple_buy": {  # simple_buy simple_sell grid_buy
+                "tp_distance": 100,
+                "sl_distance": 100,
+                "initial_lot_size": 0.01,
+                "grid_distance": 100,
+                "lot_multiplier": 1.35,
+            }
+        },
     )
 
     engine = BacktestEngine(config)

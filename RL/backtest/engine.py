@@ -2,42 +2,44 @@
 
 import numpy as np
 import pandas as pd
-from datetime import datetime
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.managers.risk_manager import RiskManager
-from backtest.config import BacktestConfig
 from backtest.utils.progress import BarProgress
 
 
 class BacktestEngine:
-    def __init__(self, config: BacktestConfig):
+    def __init__(self, config):
+        """
+        config: instancia de BacktestConfig, debe tener `strategies_params` como
+                un dict con una sola clave = nombre de la estrategia.
+        """
         self.config = config
         self.equity_over_time = []
+        self.strategy = None  # se llenará en _setup_managers
 
     def run_backtest(self, input_data: pd.DataFrame) -> dict:
-        # Paso 1: preparar datos
+        # 1) preparar datos
         df = self._prepare_dataframe(input_data)
         dates, symbols = self._extract_index_symbols(df)
 
-        # Paso 2: pre‑llenar matrices de precios (solo OHLC)
+        # 2) llenar matrices de precios
         price_matrices = self._init_price_matrices(len(dates), len(symbols))
         self._fill_price_matrices(df, dates, symbols, price_matrices)
 
-        # Paso 3: mapping de puntos/tick_value + setup de managers
+        # 3) mapping de puntos/tick_value y setup de managers
         symbol_points = self._map_symbol_points(df, symbols)
         em, pm, risk, sym2idx = self._setup_managers(symbol_points, symbols)
 
-        # Paso 4: instanciar generadores de señal y mapeo global→local por símbolo
+        # 4) crear signal generators y mapeo fecha→índice local
         signal_gens = {}
         local_idx_map = {}
         for sym in symbols:
             grp = df[df["Symbol"] == sym]
             signal_gens[sym] = self.config.strategy_signal_class(grp)
-            # mapa fecha → posición en el array de ese símbolo
             local_idx_map[sym] = {dt: idx for idx, dt in enumerate(grp.index)}
 
-        # Paso 5: simular barra a barra, consultando la señal en el momento
+        # 5) simular barra a barra
         results = self._simulate_backtest(
             dates,
             symbols,
@@ -50,21 +52,19 @@ class BacktestEngine:
             local_idx_map,
         )
 
-        # Paso 6: calcular estadísticas
-        stats = self._finalize(em, results, symbol_points)
+        # 6) estadísticas finales
+        stats = self._finalize(em, results)
         return stats
 
-    def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _prepare_dataframe(self, df):
         if df is None or df.empty:
             raise ValueError("No hay datos de mercado para el backtest.")
         return df.sort_index()
 
-    def _extract_index_symbols(self, df: pd.DataFrame):
-        dates = df.index.unique()
-        symbols = df["Symbol"].unique()
-        return dates, symbols
+    def _extract_index_symbols(self, df):
+        return df.index.unique(), df["Symbol"].unique()
 
-    def _init_price_matrices(self, n_steps: int, n_sym: int):
+    def _init_price_matrices(self, n_steps, n_sym):
         shape = (n_steps, n_sym)
         return {
             "open": np.zeros(shape),
@@ -74,7 +74,6 @@ class BacktestEngine:
         }
 
     def _fill_price_matrices(self, df, dates, symbols, m):
-        dates_idx = {dt: i for i, dt in enumerate(dates)}
         for j, sym in enumerate(symbols):
             grp = df[df["Symbol"] == sym]
             length = len(grp)
@@ -91,12 +90,26 @@ class BacktestEngine:
         }
 
     def _setup_managers(self, symbol_points, symbols):
+        # 1) determinar nombre de la estrategia
+        params_dict = getattr(self.config, "strategies_params", {}) or {}
+        if len(params_dict) == 1:
+            strat = next(iter(params_dict))
+        else:
+            raise ValueError(
+                "Debe pasar exactamente una estrategia en strategies_params."
+            )
+        self.strategy = strat
+        params = params_dict[strat]
+
+        # 2) crear EntryManager con esos params
         em = EntryManager(
-            self.config.initial_balance, symbol_points_mapping=symbol_points
+            self.config.initial_balance,
+            strategies_params=params,
+            symbol_points_mapping=symbol_points,
         )
         pm = em.position_manager
 
-        # Parche para incluir meta‑info en cada open_position
+        # 3) parche para añadir meta-info a cada posición abierta
         sym2idx = {sym: i for i, sym in enumerate(symbols)}
         orig_open = pm.open_position
 
@@ -122,16 +135,7 @@ class BacktestEngine:
         return em, pm, risk, sym2idx
 
     def _simulate_backtest(
-        self,
-        dates,
-        symbols,
-        m,
-        em: EntryManager,
-        pm,
-        risk: RiskManager,
-        sym2idx,
-        signal_gens: dict,
-        local_idx_map: dict,
+        self, dates, symbols, m, em, pm, risk, sym2idx, signal_gens, local_idx_map
     ):
         n = len(dates)
         equity = np.empty(n)
@@ -146,41 +150,36 @@ class BacktestEngine:
             l = m["low"][i]
             c = m["close"][i]
 
-            # 1) cierres por TP/SL
+            # cierres por TP/SL
             risk.check_tp_sl(l, h, symbols, date)
 
-            # 2) Señales y aperturas barra a barra
+            # aperturas y grids
             for j, sym in enumerate(symbols):
                 price_o = o[j]
                 if price_o <= 0:
                     continue
-
-                # traducir global date → índice local en el DataFrame de ese símbolo
                 local_i = local_idx_map[sym].get(date)
                 if local_i is None:
                     continue
-
-                # generar señal en el momento
-                b, s = signal_gens[sym].generate_signals_for_candle(local_i)
-
+                buy_sig, sell_sig = signal_gens[sym].generate_signals_for_candle(
+                    local_i
+                )
                 em.apply_strategy(
-                    self.config.strategy_name,
+                    self.strategy,
                     sym,
-                    bool(b),
-                    bool(s),
+                    bool(buy_sig),
+                    bool(sell_sig),
                     price_o,
                     i,
                     date,
                 )
 
-            # 3) snapshot intradía
+            # snapshot intradía
             eq, bal, cnt, lots = self._compute_equity_balance(pm, c)
             equity[i], balance[i], open_trades[i], open_lots[i] = eq, bal, cnt, lots
-
             progress.update(i + 1)
         progress.stop()
 
-        # Volcar a lista de records
         records = [
             {
                 "date": dt,
@@ -196,7 +195,7 @@ class BacktestEngine:
         em.equity_over_time = records
         return {"records": records, "results": pm.results}
 
-    def _finalize(self, em: EntryManager, sim_data, symbol_points):
+    def _finalize(self, em, sim_data):
         stats = Statistics(
             em.position_manager.results,
             em.equity_over_time,
