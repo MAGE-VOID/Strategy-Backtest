@@ -36,7 +36,16 @@ if __name__ == "__main__":
                 "initial_lot_size": 0.01,
                 "grid_distance": 100,
                 "lot_multiplier": 1.35,
-            }
+                "magic": 123456,
+            },
+            "simple_sell": {  # simple_buy simple_sell grid_buy
+                "tp_distance": 100,
+                "sl_distance": 100,
+                "initial_lot_size": 0.01,
+                "grid_distance": 100,
+                "lot_multiplier": 1.35,
+                "magic": 234567,
+            },
         },
     )
 

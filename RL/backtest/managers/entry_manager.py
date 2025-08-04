@@ -152,11 +152,16 @@ class EntryManager:
 
     def get_positions(self, symbol=None, position_type=None):
         all_pos = self.position_manager.positions
+        # Si no filtramos por símbolo, devolvemos todo (incluidos distintos magics)
         if symbol is None:
             return all_pos
+
+        # Magic actual
+        current_magic = self.position_manager.default_magic
+
         return {
-            t: p
-            for t, p in all_pos.items()
-            if p["symbol"] == symbol
-            and (position_type is None or p["position"] == position_type)
+            ticket: pos
+            for ticket, pos in all_pos.items()
+            if pos["symbol"] == symbol
+            and (current_magic is None or pos.get("magic") == current_magic)
         }
