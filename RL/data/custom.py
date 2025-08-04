@@ -94,6 +94,7 @@ def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataF
 
         df["Point"] = point_size
         df["Tick_Value"] = tick_value
+        df["Point_Value"] = point_value
     else:
         df["Point"] = None
         df["Tick_Value"] = None

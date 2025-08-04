@@ -1,147 +1,215 @@
 # backtest/managers/entry_manager.py
+from __future__ import annotations
 
 import numpy as np
+from typing import Optional, Tuple, Dict, Any
 from backtest.managers.position_manager import PositionManager
 
 
 class EntryManager:
+    """
+    Gestiona la apertura de posiciones y la lógica auxiliar para estrategias grid.
+    """
+
     def __init__(
-        self, initial_balance, strategies_params=None, symbol_points_mapping=None
-    ):
-        self.position_manager = PositionManager(initial_balance, symbol_points_mapping)
+        self,
+        initial_balance: float,
+        strategies_params: Optional[Dict[str, Dict[str, Any]]] = None,
+        symbol_points_mapping: Optional[Dict[str, Dict[str, float]]] = None,
+    ) -> None:
         self.strategies_params = strategies_params or {}
         self.symbol_points_mapping = symbol_points_mapping or {}
 
-        # Estado para grid
-        self.first_position_tp = {}
-        self.first_position_sl = {}
-        self.last_position_price = {}
-        self.grid_positions = {}
+        self.position_manager = PositionManager(initial_balance, symbol_points_mapping)
 
-        # Parámetros de estrategia
-        self.tp_distance = self.strategies_params.get("tp_distance", 100)
-        self.sl_distance = self.strategies_params.get("sl_distance", None)
-        self.grid_distance = self.strategies_params.get("grid_distance", 100)
-        self.lot_multiplier = self.strategies_params.get("lot_multiplier", 1.35)
-        self.initial_lot_size = self.strategies_params.get("initial_lot_size", 0.01)
+        # Estructuras auxiliares para grid
+        self.first_position_tp: Dict[str, float] = {}
+        self.first_position_sl: Dict[str, float] = {}
+        self.last_position_price: Dict[str, float] = {}
+        self.grid_positions: Dict[str, int] = {}
 
-    def get_symbol_data(self, symbol):
-        if symbol not in self.symbol_points_mapping:
-            raise ValueError(f"Symbol {symbol} not found in provided mapping.")
-        d = self.symbol_points_mapping[symbol]
-        return d["point"], d["tick_value"]
+        # Spread fijo (en puntos). Si usas spread variable cámbialo.
+        self.spread_points: int = 2
 
-    def get_symbol_points(self, symbol):
-        point, _ = self.get_symbol_data(symbol)
-        return point
+    # ------------------------------------------------------------------ #
+    # Utilidades internas                                                #
+    # ------------------------------------------------------------------ #
+    def get_symbol_points(self, symbol: str) -> float:
+        return self.symbol_points_mapping[symbol]["point"]
 
-    def calculate_tp_sl(self, current_price, symbol, is_buy=True):
-        point, _ = self.get_symbol_data(symbol)
-        tp_dist = self.tp_distance * point
-        sl_dist = self.sl_distance * point if self.sl_distance is not None else None
+    def calculate_tp_sl(
+        self,
+        bid_price: float,
+        point: float,
+        tp_distance: int,
+        sl_distance: Optional[int],
+        is_buy: bool,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """
+        Calcula TP y SL **en el precio que realmente dispara la orden**.
+        BUY  → disparador = Bid ; SELL → disparador = Ask.
+        """
+        spread_move = self.spread_points * point
 
         if is_buy:
-            tp = current_price + tp_dist
-            sl = current_price - sl_dist if sl_dist is not None else None
+            trigger = bid_price  # Bid
+            tp = trigger + tp_distance * point
+            sl = trigger - sl_distance * point if sl_distance is not None else None
         else:
-            tp = current_price - tp_dist
-            sl = current_price + sl_dist if sl_dist is not None else None
+            trigger = bid_price + spread_move  # Ask
+            tp = trigger - tp_distance * point
+            sl = trigger + sl_distance * point if sl_distance is not None else None
 
         return tp, sl
 
-    def calculate_lot_size(self, symbol):
-        return self.initial_lot_size * (
-            self.lot_multiplier ** self.grid_positions.get(symbol, 0)
+    def _has_open(self, symbol: str, position_type: str, magic: int) -> bool:
+        return any(
+            p
+            for p in self.position_manager.positions.values()
+            if p["symbol"] == symbol
+            and p["position"] == position_type
+            and p["magic"] == magic
         )
 
-    def update_symbol_data(self, symbol, current_price, tp):
-        """
-        Inicializa los contadores de grid en la primera posición.
-        """
-        self.first_position_tp[symbol] = tp
-        self.last_position_price[symbol] = current_price
-        self.grid_positions[symbol] = 1
+    # ------------------------------------------------------------------ #
+    # Apertura de posiciones                                             #
+    # ------------------------------------------------------------------ #
+    def _open_position(
+        self,
+        symbol: str,
+        current_bid: float,
+        date,
+        is_buy: bool,
+        params: Dict[str, Any],
+        lot_size: Optional[float] = None,
+    ) -> None:
+        if lot_size is None:
+            lot_size = params["initial_lot_size"]
 
-    def apply_strategy(
-        self, strategy_name, symbol, signal_buy, signal_sell, current_price, index, date
-    ):
-        if strategy_name == "simple_buy":
-            self._execute_trade(symbol, signal_buy, current_price, date, is_buy=True)
-        elif strategy_name == "simple_sell":
-            self._execute_trade(symbol, signal_sell, current_price, date, is_buy=False)
-        elif strategy_name == "grid_buy" and signal_buy:
-            self.grid_buy(symbol, current_price, date)
+        point = self.get_symbol_points(symbol)
+        spread_move = self.spread_points * point
 
-    def _execute_trade(self, symbol, signal, current_price, date, is_buy=True):
-        if signal and not self.get_positions(symbol, "long" if is_buy else "short"):
-            self._open_position(
-                symbol, current_price, date, is_buy, self.initial_lot_size
-            )
+        # Precio de ejecución (Ask para BUY, Bid para SELL)
+        entry_price = current_bid + spread_move if is_buy else current_bid
 
-    def _open_position(self, symbol, current_price, date, is_buy=True, lot_size=None):
-        tp, sl = self.calculate_tp_sl(current_price, symbol, is_buy)
-        pos_type = "long" if is_buy else "short"
+        tp, sl = self.calculate_tp_sl(
+            bid_price=current_bid,
+            point=point,
+            tp_distance=params["tp_distance"],
+            sl_distance=params["sl_distance"],
+            is_buy=is_buy,
+        )
+
+        position_type = "long" if is_buy else "short"
+
         self.position_manager.open_position(
-            symbol, pos_type, current_price, lot_size, sl=sl, tp=tp, open_date=date
+            symbol=symbol,
+            position_type=position_type,
+            price=entry_price,
+            lot_size=lot_size,
+            sl=sl,
+            tp=tp,
+            open_date=date,
+            magic=params["magic"],
         )
 
-    def grid_buy(self, symbol, current_price, date):
-        point = self.get_symbol_points(symbol)
-        long_positions = self.get_positions(symbol, "long")
+    # ------------------------------------------------------------------ #
+    # Interface usado por BacktestEngine                                 #
+    # ------------------------------------------------------------------ #
+    def apply_strategy(
+        self,
+        strategy_name: str,
+        symbol: str,
+        signal_buy: bool,
+        signal_sell: bool,
+        current_price: float,
+        index: int,
+        date,
+    ) -> None:
+        params = self.strategies_params[strategy_name]
+        magic = params["magic"]
 
-        if not long_positions:
-            tp = current_price + self.tp_distance * point
-            self._open_position(
-                symbol, current_price, date, is_buy=True, lot_size=self.initial_lot_size
-            )
-            self.update_symbol_data(symbol, current_price, tp)
+        if strategy_name == "simple_buy":
+            if signal_buy and not self._has_open(symbol, "long", magic):
+                self._open_position(symbol, current_price, date, True, params)
+
+        elif strategy_name == "simple_sell":
+            if signal_sell and not self._has_open(symbol, "short", magic):
+                self._open_position(symbol, current_price, date, False, params)
+
+        elif strategy_name == "grid_buy" and signal_buy:
+            self.grid_buy(symbol, current_price, date, params)
+
+    # ------------------------------------------------------------------ #
+    # Estrategia Grid BUY                                                #
+    # ------------------------------------------------------------------ #
+    def grid_buy(self, symbol: str, current_price: float, date, params: Dict[str, Any]):
+        point = self.get_symbol_points(symbol)
+        magic = params["magic"]
+
+        longs = [
+            p
+            for p in self.position_manager.positions.values()
+            if p["symbol"] == symbol and p["position"] == "long" and p["magic"] == magic
+        ]
+
+        if not longs:
+            self._open_position(symbol, current_price, date, True, params)
+            self.last_position_price[symbol] = current_price
+            self.grid_positions[symbol] = 1
         else:
-            last_price = self.last_position_price[symbol]
-            if current_price <= last_price - self.grid_distance * point:
-                self._add_grid_position(symbol, current_price)
+            last = self.last_position_price.get(symbol)
+            if last is None:
+                return
+            if current_price <= last - params["grid_distance"] * point:
+                self._add_grid_position(symbol, current_price, params)
 
-    def _add_grid_position(self, symbol, current_price):
-        lot_size = self.calculate_lot_size(symbol)
-        # Abrimos nueva posición sin fecha (se hereda None)
-        self._open_position(symbol, current_price, None, is_buy=True, lot_size=lot_size)
+    def _add_grid_position(
+        self, symbol: str, current_price: float, params: Dict[str, Any]
+    ) -> None:
+        count = self.grid_positions.get(symbol, 0)
+        lot_size = params["initial_lot_size"] * (params["lot_multiplier"] ** count)
+        self._open_position(
+            symbol, current_price, None, True, params, lot_size=lot_size
+        )
         self.last_position_price[symbol] = current_price
-        self.grid_positions[symbol] += 1
-        self.update_tp_sl(symbol)
+        self.grid_positions[symbol] = count + 1
+        self.update_tp_sl(symbol, params)
 
-    def update_tp_sl(self, symbol):
-        """
-        Recalcula TP/SL de todas las posiciones abiertas de un símbolo tras un nuevo grid.
-        """
-        long_positions = self.get_positions(symbol, "long")
-        if not long_positions:
+    def update_tp_sl(self, symbol: str, params: Dict[str, Any]) -> None:
+        magic = params["magic"]
+        longs = [
+            p
+            for p in self.position_manager.positions.values()
+            if p["symbol"] == symbol and p["position"] == "long" and p["magic"] == magic
+        ]
+        if not longs:
             return
 
-        prices = np.array([pos["entry_price"] for pos in long_positions.values()])
-        lots = np.array([pos["lot_size"] for pos in long_positions.values()])
-        total = lots.sum()
-        if total == 0:
+        prices = np.array([p["entry_price"] for p in longs])  # Ask
+        lots = np.array([p["lot_size"] for p in longs])
+        total_lots = lots.sum()
+        if total_lots == 0:
             return
 
-        avg_price = np.dot(prices, lots) / total
+        avg_ask = np.dot(prices, lots) / total_lots
         point = self.get_symbol_points(symbol)
+        spread_move = self.spread_points * point
+        bid_equiv = avg_ask - spread_move
 
-        new_tp = avg_price + self.tp_distance * point
+        new_tp = bid_equiv + params["tp_distance"] * point
         new_sl = (
-            avg_price - self.sl_distance * point
-            if self.sl_distance is not None
+            bid_equiv - params["sl_distance"] * point
+            if params["sl_distance"] is not None
             else None
         )
 
-        self.first_position_tp[symbol] = new_tp
-        if new_sl is not None:
-            self.first_position_sl[symbol] = new_sl
-
         self.position_manager.update_symbol_tp_sl(symbol, tp=new_tp, sl=new_sl)
 
-    def clear_symbol_data(self, symbol):
-        """
-        Resetea todos los estados de grid para un símbolo sin posiciones abiertas.
-        """
+    # ------------------------------------------------------------------ #
+    # Limpieza de estado                                                 #
+    # ------------------------------------------------------------------ #
+    def clear_symbol_data(self, symbol: str) -> None:
         for d in (
             self.first_position_tp,
             self.first_position_sl,
@@ -149,19 +217,3 @@ class EntryManager:
             self.grid_positions,
         ):
             d.pop(symbol, None)
-
-    def get_positions(self, symbol=None, position_type=None):
-        all_pos = self.position_manager.positions
-        # Si no filtramos por símbolo, devolvemos todo (incluidos distintos magics)
-        if symbol is None:
-            return all_pos
-
-        # Magic actual
-        current_magic = self.position_manager.default_magic
-
-        return {
-            ticket: pos
-            for ticket, pos in all_pos.items()
-            if pos["symbol"] == symbol
-            and (current_magic is None or pos.get("magic") == current_magic)
-        }

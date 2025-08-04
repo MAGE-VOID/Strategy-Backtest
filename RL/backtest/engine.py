@@ -11,9 +11,9 @@ from backtest.utils.progress import BarProgress
 class BacktestEngine:
     def __init__(self, config):
         self.config = config
-        self.debug_mode = config.debug_mode  # "none", "realtime" o "final"
+        self.debug_mode = config.debug_mode
+        self.strategies = list(config.strategies_params.keys())
         self.equity_over_time = []
-        self.strategy = None
 
     def run_backtest(self, input_data: pd.DataFrame) -> dict:
         df = self._prepare_dataframe(input_data)
@@ -25,7 +25,6 @@ class BacktestEngine:
         symbol_points = self._map_symbol_points(df, symbols)
         em, pm, risk = self._setup_managers(symbol_points, symbols)
 
-        # generadores de señal y mapping fecha→índice local
         signal_gens = {}
         local_idx_map = {}
         for sym in symbols:
@@ -41,7 +40,7 @@ class BacktestEngine:
 
     def _prepare_dataframe(self, df):
         if df is None or df.empty:
-            raise ValueError("No hay datos de mercado para el backtest.")
+            raise ValueError("No hay datos para el backtest.")
         return df.sort_index()
 
     def _extract_index_symbols(self, df):
@@ -61,27 +60,20 @@ class BacktestEngine:
         return {
             sym: {
                 "point": df.loc[df["Symbol"] == sym, "Point"].iat[0],
-                "tick_value": df.loc[df["Symbol"] == sym, "Tick_Value"].iat[0],
+                #"tick_value": df.loc[df["Symbol"] == sym, "Tick_Value"].iat[0],
+                "point_value": df.loc[df["Symbol"] == sym, "Point_Value"].iat[0],
             }
             for sym in symbols
         }
 
     def _setup_managers(self, symbol_points, symbols):
-        # sólo una estrategia en config.strategies_params
-        strat_name, params = next(iter(self.config.strategies_params.items()))
-        self.strategy = strat_name
-
         em = EntryManager(
             self.config.initial_balance,
-            strategies_params=params,
+            strategies_params=self.config.strategies_params,
             symbol_points_mapping=symbol_points,
         )
         pm = em.position_manager
-        pm.default_magic = params.get("magic")
-
-        # inyectamos sym2idx para metadata
         pm.sym2idx = {sym: idx for idx, sym in enumerate(symbols)}
-
         risk = RiskManager(em, pm)
         return em, pm, risk
 
@@ -103,10 +95,10 @@ class BacktestEngine:
                 mats["close"][i],
             )
 
-            # cierres por TP/SL
+            # 1) cierres por TP/SL
             risk.check_tp_sl(l, h, symbols, date)
 
-            # entrada de nuevas posiciones
+            # 2) aperturas por estrategia
             for j, sym in enumerate(symbols):
                 price_o = o[j]
                 if price_o <= 0:
@@ -114,23 +106,24 @@ class BacktestEngine:
                 local_i = local_idx_map[sym].get(date)
                 if local_i is None:
                     continue
-                buy_sig, sell_sig = signal_gens[sym].generate_signals_for_candle(
-                    local_i
-                )
-                em.apply_strategy(
-                    self.strategy, sym, bool(buy_sig), bool(sell_sig), price_o, i, date
-                )
 
-            # snapshot intradía
+                buy, sell = signal_gens[sym].generate_signals_for_candle(local_i)
+                for strat in self.strategies:
+                    em.apply_strategy(
+                        strat, sym, bool(buy), bool(sell), price_o, i, date
+                    )
+
+            # 3) snapshot intradía
             eq, bal, cnt, lots = self._compute_equity_balance(pm, c)
             equity[i], balance[i], open_trades[i], open_lots[i] = eq, bal, cnt, lots
             prog.update(i + 1)
         prog.stop()
 
         if self.debug_mode == "final":
-            df_all = pd.DataFrame(pm.results)
+            import pandas as pd
+
             print("\n--- [DEBUG final] Todas las operaciones ---")
-            print(df_all.to_string(index=False))
+            print(pd.DataFrame(pm.results).to_string(index=False))
 
         records = [
             {

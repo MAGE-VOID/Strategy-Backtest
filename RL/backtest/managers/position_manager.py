@@ -11,10 +11,9 @@ class PositionManager:
         self.global_counter = 0
         self.results = []
 
-        # Para calcular metadata
-        self.default_magic = None
+        # metadata
         self.symbol_points_mapping = symbol_points_mapping or {}
-        self.sym2idx = {}  # se inyecta desde el engine
+        self.sym2idx = {}
 
     def open_position(
         self,
@@ -25,6 +24,7 @@ class PositionManager:
         sl=None,
         tp=None,
         open_date=None,
+        magic=None,
     ):
         open_time = (
             open_date.strftime("%Y-%m-%d %H:%M:%S")
@@ -32,15 +32,14 @@ class PositionManager:
             else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
 
-        # metadata calculada internamente
         sym_idx = self.sym2idx.get(symbol)
         meta = self.symbol_points_mapping.get(symbol, {})
         point = meta.get("point")
-        tick = meta.get("tick_value")
+        # Usamos point_value para calcular profit/equity
+        tick = meta.get("point_value")
         direction = 1 if position_type == "long" else -1
-        magic = self.default_magic
 
-        # guardo en memoria
+        # guardamos la posición abierta
         pos = {
             "symbol": symbol,
             "position": position_type,
@@ -50,7 +49,7 @@ class PositionManager:
             "tp": tp,
             "open_time": open_time,
             "status": "open",
-            # metadata
+            # metadata para cálculos posteriores
             "sym_idx": sym_idx,
             "point": point,
             "tick": tick,
@@ -59,7 +58,7 @@ class PositionManager:
         }
         self.positions[self.ticket_counter] = pos
 
-        # y también en el log de resultados
+        # log de apertura
         result = {
             "count": self.global_counter + 1,
             "symbol": symbol,
@@ -71,7 +70,6 @@ class PositionManager:
             "tp": tp,
             "open_time": open_time,
             "status": "open",
-            # metadata
             "sym_idx": sym_idx,
             "point": point,
             "tick": tick,
@@ -88,24 +86,23 @@ class PositionManager:
         if position is None:
             return
 
-        symbol = position["symbol"]
-        meta = self.symbol_points_mapping[symbol]
-        point = meta["point"]
-        tick_value = meta["tick_value"]
+        # Extraemos point y tick directamente de la posición
+        point = position["point"]
+        tick = position["tick"]
 
-        # cálculo de profit
+        # cálculo de profit según la dirección
         if position["position"] == "long":
             diff = current_price - position["entry_price"]
         else:
             diff = position["entry_price"] - current_price
 
-        profit = (diff / point) * tick_value * position["lot_size"]
+        profit = (diff / point) * tick * position["lot_size"]
         self.balance += profit
 
-        # registro del cierre, con la misma metadata
+        # log de cierre
         result = {
             "count": self.global_counter + 1,
-            "symbol": symbol,
+            "symbol": position["symbol"],
             "ticket": ticket,
             "type": position["position"],
             "entry": position["entry_price"],
@@ -114,10 +111,9 @@ class PositionManager:
             "profit": profit,
             "balance": self.balance,
             "status": "closed",
-            # metadata
             "sym_idx": position.get("sym_idx"),
-            "point": position.get("point"),
-            "tick": position.get("tick"),
+            "point": point,
+            "tick": tick,
             "dir": position.get("dir"),
             "magic": position.get("magic"),
         }
@@ -133,7 +129,7 @@ class PositionManager:
         if sl is not None:
             pos["sl"] = sl
 
-        # reflejarlo también en el log de apertura
+        # reflejar en el log de apertura
         for rec in reversed(self.results):
             if rec.get("ticket") == ticket and rec.get("status") == "open":
                 if tp is not None:

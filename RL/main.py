@@ -31,24 +31,25 @@ if __name__ == "__main__":
         debug_mode="none",  # opciones: "none", "final", "realtime"
         strategies_params={
             "simple_buy": {  # simple_buy simple_sell grid_buy
-                "tp_distance": 100,
-                "sl_distance": 100,
+                "tp_distance": 200,
+                "sl_distance": 200,
                 "initial_lot_size": 0.01,
                 "grid_distance": 100,
                 "lot_multiplier": 1.35,
                 "magic": 123456,
             },
             "simple_sell": {  # simple_buy simple_sell grid_buy
-                "tp_distance": 100,
-                "sl_distance": 100,
+                "tp_distance": 200,
+                "sl_distance": 200,
                 "initial_lot_size": 0.01,
                 "grid_distance": 100,
                 "lot_multiplier": 1.35,
                 "magic": 234567,
-            },
+            }
         },
     )
 
+    
     engine = BacktestEngine(config)
     result_backtest = engine.run_backtest(df)
 
