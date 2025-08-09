@@ -45,11 +45,10 @@ if __name__ == "__main__":
                 "grid_distance": 100,
                 "lot_multiplier": 1.35,
                 "magic": 234567,
-            }
+            },
         },
     )
 
-    
     engine = BacktestEngine(config)
     result_backtest = engine.run_backtest(df)
 

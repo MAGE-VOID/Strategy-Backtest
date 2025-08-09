@@ -8,54 +8,55 @@ from plotly.subplots import make_subplots
 pio.renderers.default = "browser"
 
 
+def _downsample_evenly(df: pd.DataFrame, max_points: int) -> pd.DataFrame:
+    n = len(df)
+    if n <= max_points:
+        return df.reset_index(drop=True)
+    idx = np.linspace(0, n - 1, max_points).astype(int)
+    return df.iloc[idx].reset_index(drop=True)
+
+
 def add_trace_gl(fig, df, x_col, y_col, name, color, row, col):
-    """Función auxiliar para agregar una traza usando Scattergl."""
     fig.add_trace(
         go.Scattergl(
             x=df[x_col],
             y=df[y_col],
             mode="lines",
             name=name,
-            line=dict(color=color, width=1),
+            line=dict(width=1, color=color),
         ),
         row=row,
         col=col,
     )
 
 
+def _dd_series(values: np.ndarray) -> np.ndarray:
+    if values.size == 0:
+        return np.array([])
+    cum_max = np.maximum.accumulate(values)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        dd_pct = np.where(cum_max > 0, (cum_max - values) / cum_max * 100.0, 0.0)
+    return -dd_pct  # negativo (0 en máximos, <0 en DD)
+
+
 def plot_equity_balance(
     result_backtest: dict, max_points: int = 10000, theme: str = "dark"
 ) -> go.Figure:
     """
-    Crea y muestra un gráfico interactivo responsive con cuatro subgráficos utilizando Scattergl:
-      - Subplot 1 (grande): Evolución de la Equity y el Balance.
-      - Subplot 2 (pequeño): Evolución del Drawdown Exposure (equity - balance).
-      - Subplot 3 (pequeño): Rotación de Operaciones Abiertas (cantidad de operaciones abiertas).
-      - Subplot 4 (pequeño): Cantidad total de lotes abiertos.
-
-    El gráfico está configurado para que el pan vertical esté bloqueado (los ejes Y son fijos), de modo que
-    al hacer scroll se realice zoom horizontal, manteniendo los rangos verticales.
-
-    Se aplica downsampling si el número de puntos supera max_points para conservar rendimiento.
-
-    NOTA: Para lograr scroll vertical interno, es recomendable incrustar la figura en un contenedor HTML
-    con CSS (por ejemplo, `overflow-y: auto; max-height: 90vh;`).
-
-    Parameters:
-      result_backtest (dict): Diccionario con resultados del backtest (debe incluir "equity_over_time").
-      max_points (int): Número máximo de puntos a trazar.
-      theme (str): "dark" o "white". Se usa "plotly_dark" para dark mode.
-
-    Returns:
-      go.Figure: La figura interactiva generada.
+    1) Equity (línea) y Balance (escalera tipo MT5)
+    2) Drawdown de Equity (%)
+    3) Floating P/L (Equity - Balance)
+    4) # Operaciones abiertas
+    5) Lotes abiertos
     """
-    # Seleccionar template y colores según el tema
+    # Template y colores
     if theme.lower() == "dark":
         template = "plotly_dark"
         color_map = {
             "equity": "#00cc96",
             "balance": "#EF553B",
-            "drawdown_exposure": "#636EFA",
+            "drawdown": "#FFA15A",
+            "floating": "#636EFA",
             "open_trades": "#FF851B",
             "open_lots": "#AB63FA",
         }
@@ -64,7 +65,8 @@ def plot_equity_balance(
         color_map = {
             "equity": "green",
             "balance": "blue",
-            "drawdown_exposure": "orange",
+            "drawdown": "orange",
+            "floating": "orange",
             "open_trades": "purple",
             "open_lots": "magenta",
         }
@@ -73,65 +75,100 @@ def plot_equity_balance(
         color_map = {
             "equity": "green",
             "balance": "blue",
-            "drawdown_exposure": "orange",
+            "drawdown": "orange",
+            "floating": "orange",
             "open_trades": "purple",
             "open_lots": "magenta",
         }
     pio.templates.default = template
 
-    # Preparar los datos
+    # -------------------- Preparar datos -------------------- #
+    if "equity_over_time" not in result_backtest:
+        raise ValueError("result_backtest debe incluir la clave 'equity_over_time'.")
+
     df = pd.DataFrame(result_backtest["equity_over_time"])
+    if df.empty:
+        raise ValueError("No hay datos en 'equity_over_time' para graficar.")
+
     df["date"] = pd.to_datetime(df["date"])
-    df.sort_values("date", inplace=True)
+    df = df.sort_values("date").reset_index(drop=True)
 
-    n_points = len(df)
-    if n_points > max_points:
-        step = int(n_points / max_points)
-        df = df.iloc[::step].reset_index(drop=True)
+    for col in ("equity", "balance"):
+        if col not in df.columns:
+            raise ValueError(f"Falta la columna '{col}' en equity_over_time.")
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Calcular drawdown_exposure directamente entre equity y balance
-    df["drawdown_exposure"] = df["equity"] - df["balance"]
+    df = df.dropna(subset=["equity", "balance"])
+    df["floating_pl"] = df["equity"] - df["balance"]
+
+    # Drawdown de Equity (%)
+    dd_equity = _dd_series(df["equity"].to_numpy())
+    df["dd_equity_pct"] = dd_equity
 
     if "open_trades" not in df.columns:
         df["open_trades"] = np.nan
     if "open_lots" not in df.columns:
         df["open_lots"] = np.nan
 
-    # Crear la figura con 4 subplots con alturas relativas:
-    # Subplot 1: 60% de la altura; Subplot 2 y 3: 15% cada uno; Subplot 4: 10%.
+    # Downsample (manteniendo coherencia)
+    df = _downsample_evenly(df, max_points)
+
+    # -------------------- Figura y trazas -------------------- #
     fig = make_subplots(
-        rows=4,
+        rows=5,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.08,
-        row_heights=[0.6, 0.15, 0.15, 0.10],
+        vertical_spacing=0.07,
+        row_heights=[0.46, 0.14, 0.14, 0.13, 0.13],
         subplot_titles=(
-            "Equity and Balance",
-            "Drawdown Exposure",
-            "Open Trades (Rotation)",
+            "Equity (MTM) y Balance (Step)",
+            "Drawdown de Equity (%)",
+            "Floating P/L (Equity - Balance)",
+            "Open Trades",
             "Open Lots",
         ),
     )
 
-    # Subplot 1: Equity y Balance
+    # 1) Equity + Balance
     add_trace_gl(fig, df, "date", "equity", "Equity", color_map["equity"], row=1, col=1)
-    add_trace_gl(
-        fig, df, "date", "balance", "Balance", color_map["balance"], row=1, col=1
+    fig.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=df["balance"],
+            mode="lines",
+            name="Balance",
+            line=dict(width=1, color=color_map["balance"]),
+            line_shape="hv",  # escalera tipo MT5
+        ),
+        row=1,
+        col=1,
     )
 
-    # Subplot 2: Drawdown Exposure
+    # 2) Drawdown de Equity (%)
     add_trace_gl(
         fig,
         df,
         "date",
-        "drawdown_exposure",
-        "Drawdown Exposure",
-        color_map["drawdown_exposure"],
+        "dd_equity_pct",
+        "DD Equity (%)",
+        color_map["drawdown"],
         row=2,
         col=1,
     )
 
-    # Subplot 3: Open Trades
+    # 3) Floating P/L
+    add_trace_gl(
+        fig,
+        df,
+        "date",
+        "floating_pl",
+        "Floating P/L",
+        color_map["floating"],
+        row=3,
+        col=1,
+    )
+
+    # 4) Open Trades
     add_trace_gl(
         fig,
         df,
@@ -139,31 +176,37 @@ def plot_equity_balance(
         "open_trades",
         "Open Trades",
         color_map["open_trades"],
-        row=3,
+        row=4,
         col=1,
     )
 
-    # Subplot 4: Open Lots
+    # 5) Open Lots
     add_trace_gl(
-        fig, df, "date", "open_lots", "Open Lots", color_map["open_lots"], row=4, col=1
+        fig, df, "date", "open_lots", "Open Lots", color_map["open_lots"], row=5, col=1
     )
 
-    # Actualizar layout para que sea responsive y bloquear pan vertical (fijando los ejes Y)
+    # -------------------- Layout -------------------- #
     fig.update_layout(
         template=template,
-        title="Equity, Balance, Drawdown Exposure, Open Trades and Open Lots Over Time",
+        title="Cuenta única con múltiples estrategias (aisladas por symbol+magic)",
         hovermode="x unified",
         legend_title="Metric",
         xaxis_title="Date",
-        dragmode="zoom",  # Permite zoom en lugar de pan
+        dragmode="zoom",
         autosize=True,
     )
-    # Fijar los ejes Y para bloquear pan vertical (permitiendo zoom horizontal)
-    fig.update_yaxes(title_text="Value", row=1, col=1, fixedrange=True)
-    fig.update_yaxes(title_text="Drawdown Exposure", row=2, col=1, fixedrange=True)
-    fig.update_yaxes(title_text="Open Trades", row=3, col=1, fixedrange=True)
-    fig.update_yaxes(title_text="Open Lots", row=4, col=1, fixedrange=True)
 
-    # Mostrar figura en modo responsive.
+    fig.update_yaxes(title_text="Value", row=1, col=1, fixedrange=True)
+    fig.update_yaxes(title_text="DD [%]", row=2, col=1, fixedrange=True)
+    fig.update_yaxes(
+        title_text="Floating P/L", row=3, col=1, zeroline=True, fixedrange=True
+    )
+    fig.update_yaxes(
+        title_text="Open Trades", row=4, col=1, rangemode="tozero", fixedrange=True
+    )
+    fig.update_yaxes(
+        title_text="Open Lots", row=5, col=1, rangemode="tozero", fixedrange=True
+    )
+
     fig.show(config={"responsive": True, "scrollZoom": True})
     return fig

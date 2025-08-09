@@ -8,7 +8,8 @@ from backtest.managers.position_manager import PositionManager
 
 class EntryManager:
     """
-    Gestiona la apertura de posiciones y la lógica auxiliar para estrategias grid.
+    Gestión de aperturas y lógica de grid.
+    Todo el estado se maneja por (symbol, magic) para aislar estrategias.
     """
 
     def __init__(
@@ -22,13 +23,13 @@ class EntryManager:
 
         self.position_manager = PositionManager(initial_balance, symbol_points_mapping)
 
-        # Estructuras auxiliares para grid
-        self.first_position_tp: Dict[str, float] = {}
-        self.first_position_sl: Dict[str, float] = {}
-        self.last_position_price: Dict[str, float] = {}
-        self.grid_positions: Dict[str, int] = {}
+        # Estado auxiliar por (symbol, magic)
+        self.first_position_tp: Dict[tuple, float] = {}
+        self.first_position_sl: Dict[tuple, float] = {}
+        self.last_position_price: Dict[tuple, float] = {}
+        self.grid_positions: Dict[tuple, int] = {}
 
-        # Spread fijo (en puntos). Si usas spread variable cámbialo.
+        # Spread fijo en puntos (puedes pasarlo a config si quieres)
         self.spread_points: int = 2
 
     # ------------------------------------------------------------------ #
@@ -46,19 +47,19 @@ class EntryManager:
         is_buy: bool,
     ) -> Tuple[Optional[float], Optional[float]]:
         """
-        Calcula TP y SL **en el precio que realmente dispara la orden**.
-        BUY  → disparador = Bid ; SELL → disparador = Ask.
+        TP/SL en el precio DISPARADOR correcto:
+        - BUY: TP/SL disparan en BID
+        - SELL: TP/SL disparan en ASK (= BID + spread)
         """
         spread_move = self.spread_points * point
 
         if is_buy:
-            trigger = bid_price  # Bid
-            tp = trigger + tp_distance * point
-            sl = trigger - sl_distance * point if sl_distance is not None else None
+            tp = bid_price + tp_distance * point
+            sl = bid_price - sl_distance * point if sl_distance is not None else None
         else:
-            trigger = bid_price + spread_move  # Ask
-            tp = trigger - tp_distance * point
-            sl = trigger + sl_distance * point if sl_distance is not None else None
+            ask_price = bid_price + spread_move
+            tp = ask_price - tp_distance * point
+            sl = ask_price + sl_distance * point if sl_distance is not None else None
 
         return tp, sl
 
@@ -72,7 +73,7 @@ class EntryManager:
         )
 
     # ------------------------------------------------------------------ #
-    # Apertura de posiciones                                             #
+    # Aperturas (solo al OPEN de la vela)                                #
     # ------------------------------------------------------------------ #
     def _open_position(
         self,
@@ -89,7 +90,9 @@ class EntryManager:
         point = self.get_symbol_points(symbol)
         spread_move = self.spread_points * point
 
-        # Precio de ejecución (Ask para BUY, Bid para SELL)
+        # Precio de ejecución:
+        #  - BUY se ejecuta a ASK = BID + spread
+        #  - SELL se ejecuta a BID
         entry_price = current_bid + spread_move if is_buy else current_bid
 
         tp, sl = self.calculate_tp_sl(
@@ -101,7 +104,6 @@ class EntryManager:
         )
 
         position_type = "long" if is_buy else "short"
-
         self.position_manager.open_position(
             symbol=symbol,
             position_type=position_type,
@@ -109,7 +111,7 @@ class EntryManager:
             lot_size=lot_size,
             sl=sl,
             tp=tp,
-            open_date=date,
+            open_date=date,  # importante: datetime/Timestamp real de la vela
             magic=params["magic"],
         )
 
@@ -141,11 +143,12 @@ class EntryManager:
             self.grid_buy(symbol, current_price, date, params)
 
     # ------------------------------------------------------------------ #
-    # Estrategia Grid BUY                                                #
+    # Grid BUY (aislado por (symbol, magic))                             #
     # ------------------------------------------------------------------ #
     def grid_buy(self, symbol: str, current_price: float, date, params: Dict[str, Any]):
         point = self.get_symbol_points(symbol)
         magic = params["magic"]
+        key = (symbol, magic)
 
         longs = [
             p
@@ -155,25 +158,27 @@ class EntryManager:
 
         if not longs:
             self._open_position(symbol, current_price, date, True, params)
-            self.last_position_price[symbol] = current_price
-            self.grid_positions[symbol] = 1
+            self.last_position_price[key] = current_price
+            self.grid_positions[key] = 1
         else:
-            last = self.last_position_price.get(symbol)
+            last = self.last_position_price.get(key)
             if last is None:
                 return
             if current_price <= last - params["grid_distance"] * point:
-                self._add_grid_position(symbol, current_price, params)
+                self._add_grid_position(symbol, current_price, date, params)
 
     def _add_grid_position(
-        self, symbol: str, current_price: float, params: Dict[str, Any]
+        self, symbol: str, current_price: float, date, params: Dict[str, Any]
     ) -> None:
-        count = self.grid_positions.get(symbol, 0)
+        magic = params["magic"]
+        key = (symbol, magic)
+        count = self.grid_positions.get(key, 0)
         lot_size = params["initial_lot_size"] * (params["lot_multiplier"] ** count)
         self._open_position(
-            symbol, current_price, None, True, params, lot_size=lot_size
+            symbol, current_price, date, True, params, lot_size=lot_size
         )
-        self.last_position_price[symbol] = current_price
-        self.grid_positions[symbol] = count + 1
+        self.last_position_price[key] = current_price
+        self.grid_positions[key] = count + 1
         self.update_tp_sl(symbol, params)
 
     def update_tp_sl(self, symbol: str, params: Dict[str, Any]) -> None:
@@ -186,15 +191,15 @@ class EntryManager:
         if not longs:
             return
 
-        prices = np.array([p["entry_price"] for p in longs])  # Ask
+        prices = np.array([p["entry_price"] for p in longs])  # Ask de entrada
         lots = np.array([p["lot_size"] for p in longs])
         total_lots = lots.sum()
         if total_lots == 0:
             return
 
-        avg_ask = np.dot(prices, lots) / total_lots
         point = self.get_symbol_points(symbol)
         spread_move = self.spread_points * point
+        avg_ask = np.dot(prices, lots) / total_lots
         bid_equiv = avg_ask - spread_move
 
         new_tp = bid_equiv + params["tp_distance"] * point
@@ -204,16 +209,19 @@ class EntryManager:
             else None
         )
 
-        self.position_manager.update_symbol_tp_sl(symbol, tp=new_tp, sl=new_sl)
+        self.position_manager.update_symbol_tp_sl(
+            symbol, magic=magic, tp=new_tp, sl=new_sl
+        )
 
     # ------------------------------------------------------------------ #
     # Limpieza de estado                                                 #
     # ------------------------------------------------------------------ #
-    def clear_symbol_data(self, symbol: str) -> None:
+    def clear_symbol_data(self, symbol: str, magic: int) -> None:
+        key = (symbol, magic)
         for d in (
             self.first_position_tp,
             self.first_position_sl,
             self.last_position_price,
             self.grid_positions,
         ):
-            d.pop(symbol, None)
+            d.pop(key, None)

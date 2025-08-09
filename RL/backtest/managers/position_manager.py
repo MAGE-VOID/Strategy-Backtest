@@ -1,6 +1,7 @@
 # backtest/managers/position_manager.py
 
 from datetime import datetime
+import pandas as pd
 
 
 class PositionManager:
@@ -26,20 +27,20 @@ class PositionManager:
         open_date=None,
         magic=None,
     ):
-        open_time = (
-            open_date.strftime("%Y-%m-%d %H:%M:%S")
-            if open_date
-            else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
+        # Normalizar fecha de apertura a pd.Timestamp para comparaciones consistentes
+        if open_date is None:
+            open_dt = pd.Timestamp.utcnow()
+        else:
+            open_dt = pd.Timestamp(open_date)  # acepta datetime, str, numpy, etc.
+        open_time = open_dt.strftime("%Y-%m-%d %H:%M:%S")
 
         sym_idx = self.sym2idx.get(symbol)
         meta = self.symbol_points_mapping.get(symbol, {})
         point = meta.get("point")
-        # Usamos point_value para calcular profit/equity
+        # point_value = dinero por 1 punto y 1 lote
         tick = meta.get("point_value")
         direction = 1 if position_type == "long" else -1
 
-        # guardamos la posición abierta
         pos = {
             "symbol": symbol,
             "position": position_type,
@@ -47,9 +48,9 @@ class PositionManager:
             "lot_size": lot_size,
             "sl": sl,
             "tp": tp,
-            "open_time": open_time,
+            "open_time": open_time,  # para reporte
+            "open_dt": open_dt,  # para lógica
             "status": "open",
-            # metadata para cálculos posteriores
             "sym_idx": sym_idx,
             "point": point,
             "tick": tick,
@@ -86,11 +87,10 @@ class PositionManager:
         if position is None:
             return
 
-        # Extraemos point y tick directamente de la posición
         point = position["point"]
         tick = position["tick"]
 
-        # cálculo de profit según la dirección
+        # Profit realizado por posición (independiente)
         if position["position"] == "long":
             diff = current_price - position["entry_price"]
         else:
@@ -99,14 +99,13 @@ class PositionManager:
         profit = (diff / point) * tick * position["lot_size"]
         self.balance += profit
 
-        # log de cierre
         result = {
             "count": self.global_counter + 1,
             "symbol": position["symbol"],
             "ticket": ticket,
             "type": position["position"],
             "entry": position["entry_price"],
-            "close_time": close_date.strftime("%Y-%m-%d %H:%M:%S"),
+            "close_time": pd.Timestamp(close_date).strftime("%Y-%m-%d %H:%M:%S"),
             "exit": current_price,
             "profit": profit,
             "balance": self.balance,
@@ -138,9 +137,12 @@ class PositionManager:
                     rec["sl"] = sl
                 break
 
-    def update_symbol_tp_sl(self, symbol, tp=None, sl=None):
+    def update_symbol_tp_sl(self, symbol, magic, tp=None, sl=None):
+        """
+        Actualiza TP/SL sólo para posiciones del (symbol, magic) especificado.
+        """
         for ticket, pos in self.positions.items():
-            if pos["symbol"] == symbol:
+            if pos["symbol"] == symbol and pos.get("magic") == magic:
                 self.update_position_tp_sl(ticket, tp, sl)
 
     def get_results(self):
