@@ -30,17 +30,17 @@ if __name__ == "__main__":
         strategy_signal_class=StrategySignal,
         debug_mode="none",  # opciones: "none", "final", "realtime"
         strategies_params={
-            "grid_buy": {  # simple_buy simple_sell grid_buy grid_sell
+            "simple_buy": {  # simple_buy simple_sell grid_buy
                 "tp_distance": 200,
-                "sl_distance": None,
+                "sl_distance": 200,
                 "initial_lot_size": 0.01,
                 "grid_distance": 100,
                 "lot_multiplier": 1.35,
                 "magic": 123456,
             },
-            "grid_sell": {  # simple_buy simple_sell grid_buy grid_sell
+            "simple_sell": {  # simple_buy simple_sell grid_buy
                 "tp_distance": 200,
-                "sl_distance": None,
+                "sl_distance": 200,
                 "initial_lot_size": 0.01,
                 "grid_distance": 100,
                 "lot_multiplier": 1.35,
