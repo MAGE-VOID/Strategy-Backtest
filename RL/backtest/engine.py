@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+from decimal import Decimal, ROUND_HALF_UP  # <-- añadido
 from backtest.stats import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.managers.risk_manager import RiskManager
@@ -30,7 +31,6 @@ class BacktestEngine:
         for sym in symbols:
             grp = df[df["Symbol"] == sym]
             signal_gens[sym] = self.config.strategy_signal_class(grp)
-            # fecha global -> índice local (solo si existe vela en ese símbolo)
             local_idx_map[sym] = {dt: idx for idx, dt in enumerate(grp.index)}
 
         sim = self._simulate_backtest(
@@ -55,9 +55,6 @@ class BacktestEngine:
         }
 
     def _fill_price_matrices(self, df, dates, symbols, mats):
-        """
-        Alinea cada serie OHLC por símbolo al índice global de fechas (union).
-        """
         for j, sym in enumerate(symbols):
             grp = df[df["Symbol"] == sym].sort_index()
             for fld in ("Open", "High", "Low", "Close"):
@@ -65,13 +62,22 @@ class BacktestEngine:
                 mats[fld.lower()][:, j] = s.to_numpy(dtype=float)
 
     def _map_symbol_points(self, df, symbols):
-        return {
-            sym: {
-                "point": df.loc[df["Symbol"] == sym, "Point"].iat[0],
-                "point_value": df.loc[df["Symbol"] == sym, "Point_Value"].iat[0],
+        mapping = {}
+        for sym in symbols:
+            sub = df[df["Symbol"] == sym]
+            point = sub["Point"].dropna().iat[0]
+            point_value = sub["Point_Value"].dropna().iat[0]
+            if "Digits" in sub.columns:
+                digits_series = sub["Digits"].dropna()
+                digits = int(digits_series.iat[0]) if not digits_series.empty else None
+            else:
+                digits = None
+            mapping[sym] = {
+                "point": point,
+                "point_value": point_value,
+                "digits": digits,
             }
-            for sym in symbols
-        }
+        return mapping
 
     def _setup_managers(self, symbol_points, symbols):
         em = EntryManager(
@@ -92,6 +98,7 @@ class BacktestEngine:
 
         equity = np.empty(n, dtype=float)
         balance = np.empty(n, dtype=float)
+        floating = np.empty(n, dtype=float)
         open_trades = np.empty(n, dtype=int)
         open_lots = np.empty(n, dtype=float)
 
@@ -121,7 +128,6 @@ class BacktestEngine:
 
                 buy, sell = signal_gens[sym].generate_signals_for_candle(local_i)
                 for strat in self.strategies:
-                    # Solo intentamos abrir en el OPEN de la vela
                     em.apply_strategy(
                         strat, sym, bool(buy), bool(sell), float(bid_open), i, date
                     )
@@ -135,10 +141,25 @@ class BacktestEngine:
             bid_for_equity = np.where(np.isfinite(c), c, last_bid_close)
             last_bid_close = np.where(np.isfinite(c), c, last_bid_close)
 
-            eq, bal, cnt, lots = self._compute_equity_balance(pm, bid_for_equity, em)
-            equity[i], balance[i], open_trades[i], open_lots[i] = eq, bal, cnt, lots
+            eq, bal, fpl, cnt, lots = self._compute_equity_balance(
+                pm, bid_for_equity, em
+            )
+            equity[i], balance[i], floating[i], open_trades[i], open_lots[i] = (
+                eq,
+                bal,
+                fpl,
+                cnt,
+                lots,
+            )
             prog.update(i + 1)
         prog.stop()
+
+        # 5) Drawdown de Equity (% negativo) sobre la equity redondeada
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cum_max = np.maximum.accumulate(equity)
+            dd_equity_pct = np.where(
+                cum_max > 0, -((cum_max - equity) / cum_max * 100.0), 0.0
+            )
 
         if self.debug_mode == "final":
             import pandas as pd
@@ -151,11 +172,13 @@ class BacktestEngine:
                 "date": dt,
                 "equity": eqv,
                 "balance": balv,
+                "floating": fplv,  # <-- ahora explícito y exacto
+                "dd_equity_pct": ddv,  # <-- drawdown de equity por vela
                 "open_trades": cntv,
                 "open_lots": lotv,
             }
-            for dt, eqv, balv, cntv, lotv in zip(
-                dates, equity, balance, open_trades, open_lots
+            for dt, eqv, balv, fplv, ddv, cntv, lotv in zip(
+                dates, equity, balance, floating, dd_equity_pct, open_trades, open_lots
             )
         ]
         em.equity_over_time = records
@@ -163,33 +186,51 @@ class BacktestEngine:
 
     def _compute_equity_balance(self, pm, bid_mark_prices, em):
         """
-        Equity = Balance + ∑ P/L flotante (por posición, independiente):
+        Equity = Balance + Floating (ambos a 2 decimales)
+        Floating = ∑ P/L flotante por posición valuada de forma independiente:
          - LONG: marcar a BID
          - SHORT: marcar a ASK = BID + spread
         """
-        bal = pm.balance
-        eq = bal
+        bal = pm.balance  # ya en 2 decimales (PositionManager)
+        total_float = 0.0
         total_lots = 0.0
+        open_count = 0
 
         for pos in pm.positions.values():
             sym_idx = pos["sym_idx"]
             if sym_idx is None:
                 continue
-
             bid_price = bid_mark_prices[sym_idx]
             if not np.isfinite(bid_price):
                 continue
 
-            spread_move = em.spread_points * pos["point"]
+            point = pos.get("point")
+            tick = pos.get("tick")
+            if not point or not tick:
+                continue  # seguridad
+
+            spread_move = em.spread_points * point
             mark_price = bid_price if pos["dir"] > 0 else (bid_price + spread_move)
 
             diff = pos["dir"] * (mark_price - pos["entry_price"])
-            float_pl = (diff / pos["point"]) * pos["tick"] * pos["lot_size"]
+            float_pl = (diff / point) * tick * pos["lot_size"]
 
-            eq += float_pl
+            total_float += float_pl
             total_lots += pos["lot_size"]
+            open_count += 1
 
-        return eq, bal, len(pm.positions), total_lots
+        # Normalizaciones a 2 decimales (dinero) y lotes a 2 decimales
+        floating = float(
+            Decimal(total_float).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        )
+        equity = float(
+            Decimal(bal + floating).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        )
+        open_lots = float(
+            Decimal(total_lots).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        )
+
+        return equity, bal, floating, open_count, open_lots
 
     def _finalize(self, em, sim):
         stats = Statistics(

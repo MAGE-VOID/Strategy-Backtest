@@ -12,6 +12,9 @@ class RiskManager:
     Resolución intrabar realista (qué toca primero) con modelo OHLC tipo "tick":
       - Vela alcista: O→L→H→C (Low primero)
       - Vela bajista: O→H→L→C (High primero)
+    Gaps:
+      - Si OPEN pasa por SL (peor): cerrar a OPEN (peor disponible).
+      - Si OPEN pasa por TP (mejor): cerrar en TP (sin slippage positiva).
     Limpieza de estado por (symbol, magic).
     """
 
@@ -64,6 +67,7 @@ class RiskManager:
             ):
                 continue
 
+            symbol = pos["symbol"]
             tp, sl = pos.get("tp"), pos.get("sl")
             point = pos["point"]
             spread_move = self.em.spread_points * point
@@ -73,9 +77,9 @@ class RiskManager:
             if pos["position"] == "long":
                 # Gap en apertura
                 if tp is not None and open_bid >= tp:
-                    exit_price = tp
+                    exit_price = tp  # sin positiva
                 elif sl is not None and open_bid <= sl:
-                    exit_price = sl
+                    exit_price = open_bid  # peor disponible
                 else:
                     hit_tp = (tp is not None) and (high_bid >= tp)
                     hit_sl = (sl is not None) and (low_bid <= sl)
@@ -99,9 +103,9 @@ class RiskManager:
 
                 # Gap en apertura
                 if tp is not None and open_ask <= tp:
-                    exit_price = tp
+                    exit_price = tp  # sin positiva
                 elif sl is not None and open_ask >= sl:
-                    exit_price = sl
+                    exit_price = open_ask  # peor disponible
                 else:
                     hit_tp = (tp is not None) and (low_ask <= tp)
                     hit_sl = (sl is not None) and (high_ask >= sl)
@@ -116,6 +120,8 @@ class RiskManager:
                     else:
                         exit_price = sl
 
+            # Normalizamos precio de salida al grid del símbolo
+            exit_price = self.em.normalize_price(symbol, exit_price)
             self.pm.close_position(ticket, exit_price, date)
             closed_pairs.add((pos["symbol"], pos.get("magic")))
 

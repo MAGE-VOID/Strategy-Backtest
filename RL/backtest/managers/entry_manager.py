@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Dict, Any
 import importlib
 import pkgutil
+from decimal import Decimal, ROUND_HALF_UP
 
 from backtest.managers.position_manager import PositionManager
 from backtest.managers.strategies.registry import StrategyRegistry
@@ -69,12 +70,32 @@ class EntryManager:
                 continue
             importlib.import_module(modinfo.name)
 
+    # ----------------- Utilidades de normalización ----------------- #
+    def normalize_price(self, symbol: str, price: Optional[float]) -> Optional[float]:
+        if price is None:
+            return None
+        meta = self.symbol_points_mapping.get(symbol, {})
+        point = meta.get("point") or 1e-6
+        digits = meta.get("digits")
+        # Ajuste a la grilla de ticks
+        snapped = round(price / point) * point
+        # Redondeo a dígitos (si disponible)
+        if digits is not None:
+            snapped = float(round(snapped, int(digits)))
+        return float(snapped)
+
+    def normalize_lot(self, lot: float) -> float:
+        # 2 decimales (estándar FX), mínimo 0.01
+        q = float(Decimal(lot).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+        return max(0.01, q)
+
     # ----------------- Utilidades de mercado/orden ----------------- #
     def get_symbol_points(self, symbol: str) -> float:
         return self.symbol_points_mapping[symbol]["point"]
 
     def calculate_tp_sl(
         self,
+        symbol: str,
         bid_price: float,
         point: float,
         tp_distance: int,
@@ -85,15 +106,19 @@ class EntryManager:
         TP/SL en el precio DISPARADOR correcto:
         - BUY: TP/SL disparan en BID
         - SELL: TP/SL disparan en ASK (= BID + spread)
+        Todos los niveles se normalizan a dígitos y grilla de ticks.
         """
         spread_move = self.spread_points * point
         if is_buy:
-            tp = bid_price + tp_distance * point
+            tp = bid_price + tp_distance * point if tp_distance is not None else None
             sl = bid_price - sl_distance * point if sl_distance is not None else None
         else:
             ask_price = bid_price + spread_move
-            tp = ask_price - tp_distance * point
+            tp = ask_price - tp_distance * point if tp_distance is not None else None
             sl = ask_price + sl_distance * point if sl_distance is not None else None
+
+        tp = self.normalize_price(symbol, tp)
+        sl = self.normalize_price(symbol, sl)
         return tp, sl
 
     def has_open(self, symbol: str, position_type: str, magic: int) -> bool:
@@ -114,14 +139,18 @@ class EntryManager:
         params: Dict[str, Any],
         lot_size: Optional[float] = None,
     ) -> None:
-        if lot_size is None:
-            lot_size = params["initial_lot_size"]
-
+        lot = self.normalize_lot(
+            lot_size if lot_size is not None else params["initial_lot_size"]
+        )
         point = self.get_symbol_points(symbol)
         spread_move = self.spread_points * point
 
-        entry_price = current_bid + spread_move if is_buy else current_bid
+        # Precio de entrada (BUY→Ask, SELL→Bid), normalizado
+        raw_entry = current_bid + spread_move if is_buy else current_bid
+        entry_price = self.normalize_price(symbol, raw_entry)
+
         tp, sl = self.calculate_tp_sl(
+            symbol=symbol,
             bid_price=current_bid,
             point=point,
             tp_distance=params["tp_distance"],
@@ -133,7 +162,7 @@ class EntryManager:
             symbol=symbol,
             position_type=position_type,
             price=entry_price,
-            lot_size=lot_size,
+            lot_size=lot,
             sl=sl,
             tp=tp,
             open_date=date,

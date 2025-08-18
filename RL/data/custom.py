@@ -88,6 +88,7 @@ def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataF
         tick_size = symbol_info.trade_tick_size
         tick_value = symbol_info.trade_tick_value
         point_size = symbol_info.point
+        digits = symbol_info.digits
 
         # Calcular el valor del punto (Point Value)
         point_value = (tick_value * point_size / tick_size) if tick_size != 0 else None
@@ -95,9 +96,11 @@ def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataF
         df["Point"] = point_size
         df["Tick_Value"] = tick_value
         df["Point_Value"] = point_value
+        df["Digits"] = digits
     else:
         df["Point"] = None
         df["Tick_Value"] = None
+        df["Digits"] = None
 
     return df
 

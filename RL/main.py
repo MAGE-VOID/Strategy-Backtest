@@ -6,7 +6,7 @@ from backtest.engine import BacktestEngine
 from backtest.config import BacktestConfig
 from backtest.utils.formatters import format_statistics
 from strategies.signals import StrategySignal
-from visualization.plot import plot_equity_balance
+from visualization.plot import BacktestPlotter
 
 if __name__ == "__main__":
     # Conexión a MT5
@@ -31,7 +31,7 @@ if __name__ == "__main__":
         debug_mode="none",  # opciones: "none", "final", "realtime"
         strategies_params={
             "grid_buy": {  # simple_buy simple_sell grid_buy grid_sell
-                "tp_distance": 200,
+                "tp_distance": 100,
                 "sl_distance": None,
                 "initial_lot_size": 0.01,
                 "grid_distance": 100,
@@ -39,7 +39,7 @@ if __name__ == "__main__":
                 "magic": 123456,
             },
             "grid_sell": {  # simple_buy simple_sell grid_buy grid_sell
-                "tp_distance": 200,
+                "tp_distance": 100,
                 "sl_distance": None,
                 "initial_lot_size": 0.01,
                 "grid_distance": 100,
@@ -56,4 +56,4 @@ if __name__ == "__main__":
     print("\n--- Backtest Statistics ---")
     print(stats_df)
 
-    plot_equity_balance(result_backtest)
+    BacktestPlotter().show(result_backtest)
