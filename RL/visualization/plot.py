@@ -50,7 +50,7 @@ class BacktestPlotter:
     """
 
     TEMPLATE = "plotly_dark"
-    MAX_POINTS = 20_000  # más puntos por defecto
+    MAX_POINTS = 10_000  # más puntos por defecto
     GPU_MIN_POINTS = 10_000  # evita overhead si hay pocos puntos
 
     # --- Performance knobs ---
