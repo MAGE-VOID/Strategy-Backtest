@@ -2,7 +2,7 @@
 from datetime import datetime
 import MetaTrader5 as mt5
 from data import custom as data
-from backtest.engine import BacktestEngine
+from backtest.core.engine import BacktestEngine
 from backtest.config import BacktestConfig
 from backtest.utils.formatters import format_statistics
 from strategies.signals import StrategySignal

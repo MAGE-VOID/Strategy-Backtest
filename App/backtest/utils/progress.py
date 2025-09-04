@@ -31,7 +31,5 @@ class BarProgress:
         self.progress.update(self.task_id, completed=current)
 
     def stop(self):
-        """
-        Detiene la barra de progreso.
-        """
+        """Detiene la barra de progreso."""
         self.progress.stop()

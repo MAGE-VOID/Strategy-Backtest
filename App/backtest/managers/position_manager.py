@@ -3,6 +3,10 @@
 from datetime import datetime
 import pandas as pd
 from decimal import Decimal, ROUND_HALF_UP
+from backtest.utils.normalization import (
+    normalize_lot as util_normalize_lot,
+    normalize_price as util_normalize_price,
+)
 
 
 class PositionManager:
@@ -21,19 +25,10 @@ class PositionManager:
 
     # -------- Normalizadores internos -------- #
     def _normalize_lot(self, lot: float) -> float:
-        q = float(Decimal(lot).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
-        return max(0.01, q)
+        return util_normalize_lot(lot)
 
     def _normalize_price(self, symbol: str, price):
-        if price is None:
-            return None
-        meta = self.symbol_points_mapping.get(symbol, {})
-        point = meta.get("point") or 1e-6
-        digits = meta.get("digits")
-        snapped = round(price / point) * point
-        if digits is not None:
-            snapped = float(round(snapped, int(digits)))
-        return float(snapped)
+        return util_normalize_price(symbol, price, self.symbol_points_mapping)
 
     def open_position(
         self,

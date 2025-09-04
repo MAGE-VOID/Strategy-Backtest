@@ -9,6 +9,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from backtest.managers.position_manager import PositionManager
 from backtest.managers.strategies.registry import StrategyRegistry
 import backtest.managers.strategies as strategies_pkg  # solo para descubrir módulos
+from backtest.utils.normalization import normalize_lot as util_normalize_lot
+from backtest.utils.normalization import normalize_price as util_normalize_price
 
 
 class EntryManager:
@@ -72,22 +74,12 @@ class EntryManager:
 
     # ----------------- Utilidades de normalización ----------------- #
     def normalize_price(self, symbol: str, price: Optional[float]) -> Optional[float]:
-        if price is None:
-            return None
-        meta = self.symbol_points_mapping.get(symbol, {})
-        point = meta.get("point") or 1e-6
-        digits = meta.get("digits")
-        # Ajuste a la grilla de ticks
-        snapped = round(price / point) * point
-        # Redondeo a dígitos (si disponible)
-        if digits is not None:
-            snapped = float(round(snapped, int(digits)))
-        return float(snapped)
+        """Delegado a utilitario común para evitar duplicación."""
+        return util_normalize_price(symbol, price, self.symbol_points_mapping)
 
     def normalize_lot(self, lot: float) -> float:
-        # 2 decimales (estándar FX), mínimo 0.01
-        q = float(Decimal(lot).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
-        return max(0.01, q)
+        """Delegado a utilitario común para evitar duplicación."""
+        return util_normalize_lot(lot)
 
     # ----------------- Utilidades de mercado/orden ----------------- #
     def get_symbol_points(self, symbol: str) -> float:
