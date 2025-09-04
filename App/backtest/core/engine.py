@@ -2,7 +2,7 @@
 
 import numpy as np
 import pandas as pd
-from backtest.stats import Statistics
+from backtest.analysis.statistics import Statistics
 from backtest.managers.entry_manager import EntryManager
 from backtest.managers.risk_manager import RiskManager
 from backtest.core.data import DataPrep
@@ -66,4 +66,3 @@ class BacktestEngine:
             "equity_over_time": em.equity_over_time,
             "statistics": stats,
         }
-
