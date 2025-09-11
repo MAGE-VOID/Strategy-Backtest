@@ -35,8 +35,10 @@ class Simulator:
                 local_i = local_idx_map[sym].get(date)
                 if local_i is None:
                     continue
-                buy, sell = signal_gens[sym].generate_signals_for_candle(local_i)
                 for strat in (strategies_order or list(em._strategies.keys())):
+                    # Obtain per-strategy signal generator for this symbol
+                    sig_gen = signal_gens[strat][sym]
+                    buy, sell = sig_gen.generate_signals_for_candle(local_i)
                     em.apply_strategy(strat, sym, bool(buy), bool(sell), float(bid_open), i, date)
 
             risk.check_tp_sl(opens=o, lows=l, highs=h, closes=c, date=date, only_opened_on=date)

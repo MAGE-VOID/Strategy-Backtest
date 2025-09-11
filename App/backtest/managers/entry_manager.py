@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Optional, Tuple, Dict, Any
 import importlib
 import pkgutil
-from decimal import Decimal, ROUND_HALF_UP
 
 from backtest.managers.position_manager import PositionManager
 from backtest.managers.strategies.registry import StrategyRegistry

@@ -1,6 +1,5 @@
 # backtest/managers/position_manager.py
 
-from datetime import datetime
 import pandas as pd
 from decimal import Decimal, ROUND_HALF_UP
 from backtest.utils.normalization import (

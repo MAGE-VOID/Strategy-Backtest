@@ -1,6 +1,5 @@
 # backtest/core/engine.py
 
-import numpy as np
 import pandas as pd
 from backtest.analysis.statistics import Statistics
 from backtest.managers.entry_manager import EntryManager
@@ -16,7 +15,6 @@ class BacktestEngine:
         self.config = config
         self.debug_mode = config.debug_mode
         self.strategies = list(config.strategies_params.keys())
-        self.equity_over_time = []
 
     def run_backtest(self, input_data: pd.DataFrame) -> dict:
         # Delegar responsabilidades a componentes core sin cambiar la lógica
@@ -25,8 +23,20 @@ class BacktestEngine:
         price_mats = PriceMatrixBuilder.build(df, dates, symbols)
         symbol_points = DataPrep.map_symbol_points(df, symbols)
         em, pm, risk = self._setup_managers(symbol_points, symbols)
-        signal_gens, local_idx_map = SignalBuilder.build(
-            df, dates, symbols, self.config.strategy_signal_class
+        # Build signal generators per strategy: cada estrategia debe definir
+        # explícitamente su propia clase de señales.
+        strategy_signal_classes = {}
+        for strat in self.strategies:
+            params = self.config.strategies_params.get(strat, {})
+            signal_cls = params.get("strategy_signal_class", None)
+            if signal_cls is None:
+                raise ValueError(
+                    f"Estrategia '{strat}' sin 'strategy_signal_class' definido en strategies_params."
+                )
+            strategy_signal_classes[strat] = signal_cls
+
+        signal_gens, local_idx_map = SignalBuilder.build_multi(
+            df, dates, symbols, strategy_signal_classes
         )
 
         sim = Simulator.run(
