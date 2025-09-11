@@ -9,7 +9,7 @@ from backtest.utils.normalization import (
 
 
 class PositionManager:
-    def __init__(self, balance, symbol_points_mapping=None):
+    def __init__(self, balance, symbol_points_mapping=None, commission_per_lot_side: float = 0.0):
         self.positions = {}
         self.balance = float(
             Decimal(balance).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -21,6 +21,7 @@ class PositionManager:
         # metadata
         self.symbol_points_mapping = symbol_points_mapping or {}
         self.sym2idx = {}
+        self.commission_per_lot_side = float(commission_per_lot_side or 0.0)
 
     # -------- Normalizadores internos -------- #
     def _normalize_lot(self, lot: float) -> float:
@@ -76,8 +77,23 @@ class PositionManager:
             "dir": direction,
             "magic": magic,
             "digits": digits,
+            "commission_per_lot_side": self.commission_per_lot_side,
         }
         self.positions[self.ticket_counter] = pos
+
+        # Comisión en apertura (por lado)
+        commission_open = float(
+            Decimal(self.commission_per_lot_side * lot_size).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+        ) if self.commission_per_lot_side else 0.0
+        if commission_open:
+            # Cargo inmediato a balance
+            self.balance = float(
+                Decimal(self.balance - commission_open).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+            )
 
         # log de apertura
         result = {
@@ -96,6 +112,7 @@ class PositionManager:
             "tick": tick,
             "dir": direction,
             "magic": magic,
+            "commission_open": commission_open,
         }
         self.results.append(result)
 
@@ -127,6 +144,20 @@ class PositionManager:
                 Decimal(raw_profit).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             )
 
+        # Comisión en cierre (por lado)
+        commission_close = float(
+            Decimal(self.commission_per_lot_side * position["lot_size"]).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+        ) if self.commission_per_lot_side else 0.0
+
+        # Aplicar comisión de cierre al profit
+        profit = float(
+            Decimal(profit - commission_close).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+        )
+
         # Balance con 2 decimales
         new_balance = float(
             Decimal(self.balance + profit).quantize(
@@ -151,6 +182,7 @@ class PositionManager:
             "tick": tick,
             "dir": position.get("dir"),
             "magic": position.get("magic"),
+            "commission_close": commission_close,
         }
         self.results.append(result)
         self.global_counter += 1

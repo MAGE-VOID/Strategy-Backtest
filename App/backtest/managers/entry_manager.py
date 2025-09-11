@@ -26,13 +26,18 @@ class EntryManager:
         initial_balance: float,
         strategies_params: Optional[Dict[str, Dict[str, Any]]] = None,
         symbol_points_mapping: Optional[Dict[str, Dict[str, float]]] = None,
+        commission_per_lot_side: float = 0.0,
     ) -> None:
         self.strategies_params = strategies_params or {}
         self.symbol_points_mapping = symbol_points_mapping or {}
 
-        self.position_manager = PositionManager(initial_balance, symbol_points_mapping)
+        self.position_manager = PositionManager(
+            initial_balance,
+            symbol_points_mapping,
+            commission_per_lot_side=commission_per_lot_side,
+        )
 
-        # Spread fijo en puntos (puedes pasarlo a config si quieres)
+        # Spread fijo en puntos (configurado desde BacktestConfig)
         self.spread_points: int = 2
 
         # 1) Carga dinámica de plugins (no depende de __init__.py)

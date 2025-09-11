@@ -1,6 +1,5 @@
 # main.py
 from datetime import datetime
-import os
 import MetaTrader5 as mt5
 from data import custom as data
 from backtest.core.engine import BacktestEngine
@@ -11,9 +10,9 @@ from visualization.plot import BacktestPlotter
 
 if __name__ == "__main__":
     # Conexión a MT5
-    account = int(os.getenv("MT5_ACCOUNT", "51344621"))
-    server = os.getenv("MT5_SERVER", "ICMarketsSC-Demo")
-    password = os.getenv("MT5_PASSWORD", "bCFNLB9k")
+    account = 51344621
+    server = "ICMarketsSC-Demo"
+    password = "bCFNLB9k"
     data.connect_and_login_mt5(account, server, password)
 
     inp_start_date = datetime(2010, 1, 1)
@@ -25,12 +24,11 @@ if __name__ == "__main__":
         # "GBPUSD",
     ]
 
-    df, _ = data.process_data(
-        inp_start_date, inp_end_date, symbols, timeframe
-    )
+    df, _ = data.process_data(inp_start_date, inp_end_date, symbols, timeframe)
 
     config = BacktestConfig(
         initial_balance=1000,
+        commission_per_lot_side=3.5,
         debug_mode="none",  # opciones: "none", "final", "realtime"
         strategies_params={
             "grid_buy": {  # simple_buy simple_sell grid_buy grid_sell

@@ -162,7 +162,8 @@ class BacktestPlotter:
             idx_xp = idx_np
 
         # --- Series derivadas en GPU (cummax O(n) con kernels)
-        dd_equity = self._dd_series_fast(equity, xp)  # drawdown (%)
+        # Drawdown sobre Equity (%) relativo al pico histórico de equity.
+        dd_equity = self._dd_series_fast(equity, xp)
 
         # --- Lados Long/Short si hay trades
         side = {
@@ -199,14 +200,23 @@ class BacktestPlotter:
             equity_s = self._to_numpy(cp.take(equity, idx_xp))
             balance_s = self._to_numpy(cp.take(balance, idx_xp))
             floating_s = self._to_numpy(cp.take(floating, idx_xp))
-            dd_s = self._to_numpy(cp.take(dd_equity, idx_xp))
+            # Preferir dd precomputado si viene en datos
+            if cols_np.get("dd_equity_pct") is not None:
+                dd_full = self._to_xp(cols_np["dd_equity_pct"], True, dtype=gpu_dtype)
+                dd_s = self._to_numpy(cp.take(dd_full, idx_xp))
+            else:
+                dd_s = self._to_numpy(cp.take(dd_equity, idx_xp))
             ot_s = self._to_numpy(cp.take(open_trades, idx_xp))
             ol_s = self._to_numpy(cp.take(open_lots, idx_xp))
         else:
             equity_s = self._to_numpy(equity[idx_xp])
             balance_s = self._to_numpy(balance[idx_xp])
             floating_s = self._to_numpy(floating[idx_xp])
-            dd_s = self._to_numpy(dd_equity[idx_xp])
+            if cols_np.get("dd_equity_pct") is not None:
+                dd_full = np.asarray(cols_np["dd_equity_pct"], dtype=np.float64)
+                dd_s = self._to_numpy(dd_full[idx_xp])
+            else:
+                dd_s = self._to_numpy(dd_equity[idx_xp])
             ot_s = self._to_numpy(open_trades[idx_xp])
             ol_s = self._to_numpy(open_lots[idx_xp])
 
@@ -239,7 +249,7 @@ class BacktestPlotter:
             fig, dates, balance_s, "Balance", self.COLORS["balance"], row=1, step=True
         )
 
-        # 2) Drawdown
+        # 2) Drawdown (por Equity)
         self._line(fig, dates, dd_s, "DD Equity (%)", self.COLORS["drawdown"], row=2)
 
         # 3) Floating P/L

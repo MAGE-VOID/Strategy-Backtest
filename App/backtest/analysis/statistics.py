@@ -99,6 +99,8 @@ class Statistics:
         initial_balance: float,
     ):
         self.initial_balance = float(initial_balance or 0.0)
+        # Guardamos los eventos crudos para métricas adicionales (comisiones)
+        self.events: List[Dict[str, Any]] = list(all_trades or [])
         self.trades: List[Trade] = self._reconstruct_closed_trades(all_trades or [])
         self.eq_arr, self.bal_arr, self.dt_arr = self._extract_time_series(equity_over_time or [])
 
@@ -333,6 +335,25 @@ class Statistics:
         net_profit_closed = total_profit + total_loss
         net_profit_balance = final_balance - self.initial_balance
 
+        # Comisiones (del log de eventos)
+        comm_open_total = 0.0
+        comm_close_total = 0.0
+        try:
+            for ev in self.events:
+                st = str(ev.get("status", "")).lower()
+                if st == "open":
+                    comm_open_total += float(ev.get("commission_open", 0.0) or 0.0)
+                elif st == "closed":
+                    comm_close_total += float(ev.get("commission_close", 0.0) or 0.0)
+        except Exception:
+            # Si el log no contiene campos de comisión, mantenemos 0.0
+            pass
+        comm_total = float(comm_open_total + comm_close_total)
+        # P/L antes de todas las comisiones (usando balance final)
+        net_profit_before_commissions = float(net_profit_balance + comm_total)
+        # P/L cerrado antes de comisión de cierre (profit de trades ya descuenta cierre)
+        closed_pl_before_close_commission = float(net_profit_closed + comm_close_total)
+
         # Métricas por trade
         total_trades = int(len(self.trades))
         wins_mask = profits > 0
@@ -433,6 +454,13 @@ class Statistics:
             # P/L cerrado y sanity
             "Net Profit [$]": net_profit_balance,          # balance final - inicial
             "Net Profit (Closed) [$]": net_profit_closed,  # suma de profits por trade
+            # Comisiones
+            "Commissions Open [$]": comm_open_total,
+            "Commissions Close [$]": comm_close_total,
+            "Commissions Total [$]": comm_total,
+            # P/L bruto (útil para comparar sin comisiones)
+            "Net Profit (Before Commissions) [$]": net_profit_before_commissions,
+            "Net Profit (Closed, Before Close Comm.) [$]": closed_pl_before_close_commission,
             "Open P/L at End [$]": open_pl_end,
             # Trades
             "# Total Trades": total_trades,

@@ -59,9 +59,12 @@ class BacktestEngine:
             self.config.initial_balance,
             strategies_params=self.config.strategies_params,
             symbol_points_mapping=symbol_points,
+            commission_per_lot_side=self.config.commission_per_lot_side,
         )
         pm = em.position_manager
         pm.sym2idx = {sym: idx for idx, sym in enumerate(symbols)}
+        # Alinear spread del EntryManager con el configurado
+        em.spread_points = int(self.config.spread_points)
         risk = RiskManager(em, pm)
         return em, pm, risk
 
