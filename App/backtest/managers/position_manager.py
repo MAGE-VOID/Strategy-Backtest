@@ -113,6 +113,7 @@ class PositionManager:
             "dir": direction,
             "magic": magic,
             "commission_open": commission_open,
+            "commission": commission_open,
         }
         self.results.append(result)
 
@@ -183,6 +184,7 @@ class PositionManager:
             "dir": position.get("dir"),
             "magic": position.get("magic"),
             "commission_close": commission_close,
+            "commission": commission_close,
         }
         self.results.append(result)
         self.global_counter += 1
