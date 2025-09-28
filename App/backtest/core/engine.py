@@ -35,6 +35,7 @@ class BacktestEngine:
                 )
             strategy_signal_classes[strat] = signal_cls
 
+        # Construir generadores de señales por estrategia/símbolo (vela por vela).
         signal_gens, local_idx_map = SignalBuilder.build_multi(
             df, dates, symbols, strategy_signal_classes
         )
