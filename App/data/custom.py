@@ -86,15 +86,27 @@ def _fetch_symbol_data(symbol: str, timeframe, start_date, end_date) -> pd.DataF
     if symbol_info is not None:
         tick_size = symbol_info.trade_tick_size
         tick_value = symbol_info.trade_tick_value
+        tick_value_profit = getattr(symbol_info, "trade_tick_value_profit", None)
+        tick_value_loss = getattr(symbol_info, "trade_tick_value_loss", None)
         point_size = symbol_info.point
         digits = symbol_info.digits
 
-        # Calcular el valor del punto (Point Value)
-        point_value = (tick_value * point_size / tick_size) if tick_size != 0 else None
+        # Calcular el valor por punto (dinero por 1 punto y 1 lote)
+        # Preferimos valores separados para profit/loss si están disponibles.
+        def _pv(tv):
+            return (tv * point_size / tick_size) if (tv is not None and tick_size) else None
+
+        point_value = _pv(tick_value)
+        point_value_profit = _pv(tick_value_profit) if tick_value_profit is not None else point_value
+        point_value_loss = _pv(tick_value_loss) if tick_value_loss is not None else point_value
 
         df["Point"] = point_size
         df["Tick_Value"] = tick_value
+        df["Tick_Value_Profit"] = tick_value_profit
+        df["Tick_Value_Loss"] = tick_value_loss
         df["Point_Value"] = point_value
+        df["Point_Value_Profit"] = point_value_profit
+        df["Point_Value_Loss"] = point_value_loss
         df["Digits"] = digits
     else:
         df["Point"] = None

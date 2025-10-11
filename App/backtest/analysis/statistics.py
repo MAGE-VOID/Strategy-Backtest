@@ -126,9 +126,13 @@ class Statistics:
                 )
             elif status == "closed":
                 rec.setdefault("side", str(ev.get("type", "")).lower())
+                # Preferir P/L neto total por trade (incluye comisiones open+close)
+                pl_closed = ev.get("profit_net")
+                if pl_closed is None:
+                    pl_closed = ev.get("profit", 0.0)
                 rec.update(
                     close_time=_to_datetime(ev.get("close_time")),
-                    profit=float(ev.get("profit", 0.0) or 0.0),
+                    profit=float(pl_closed or 0.0),
                 )
             by_ticket[t] = rec
 
@@ -145,7 +149,7 @@ class Statistics:
                     Trade(
                         ticket=int(rec.get("ticket")),
                         side=side,
-                        profit=float(rec.get("profit", 0.0) or 0.0),
+                        profit=float(rec.get("profit", 0.0) or 0.0),  # neto total por trade si está disponible
                         open_time=ot,
                         close_time=ct,
                     )

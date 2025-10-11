@@ -58,8 +58,10 @@ def _compute_exits_for_subset(
         direction = dir_arr[k]
 
         if direction > 0:  # long
+            # TP is a sell-limit: on gap above TP, fill at best (open_bid)
+            # SL is a sell-stop: on gap below SL, fill at worst (open_bid)
             if np.isfinite(tp) and open_bid >= tp:
-                exit_price = tp
+                exit_price = open_bid
             elif np.isfinite(sl) and open_bid <= sl:
                 exit_price = open_bid
             else:
@@ -77,8 +79,9 @@ def _compute_exits_for_subset(
             open_ask = open_bid + sp_move
             low_ask = low_bid + sp_move
             high_ask = high_bid + sp_move
+            # TP is a buy-limit: on gap below TP, fill at best (open_ask)
             if np.isfinite(tp) and open_ask <= tp:
-                exit_price = tp
+                exit_price = open_ask
             elif np.isfinite(sl) and open_ask >= sl:
                 exit_price = open_ask
             else:

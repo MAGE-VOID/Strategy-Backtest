@@ -23,7 +23,8 @@ def _compute_equity_components(
     entry_prices,
     lot_sizes,
     points,
-    ticks,
+    ticks_profit,
+    ticks_loss,
     spread_points,
 ):
     total_float = 0.0
@@ -40,8 +41,9 @@ def _compute_equity_components(
             continue
 
         point = points[idx]
-        tick = ticks[idx]
-        if point <= 0.0 or tick <= 0.0:
+        tick_p = ticks_profit[idx]
+        tick_l = ticks_loss[idx]
+        if point <= 0.0 or (tick_p <= 0.0 and tick_l <= 0.0):
             continue
 
         direction = directions[idx]
@@ -58,7 +60,9 @@ def _compute_equity_components(
 
         mark_price = bid_price if direction > 0.0 else bid_price + spread_points * point
         diff = direction * (mark_price - entry_price)
-        float_pl = (diff / point) * tick * lot
+        # Seleccionar valor por punto según signo de P/L
+        tick_val = tick_p if diff >= 0.0 else tick_l
+        float_pl = (diff / point) * tick_val * lot
 
         total_float += float_pl
         total_lots += lot
@@ -207,7 +211,8 @@ class Simulator:
             entry_prices_arr = np.full(count, np.nan, dtype=np.float64)
             lot_sizes_arr = np.zeros(count, dtype=np.float64)
             points_arr = np.zeros(count, dtype=np.float64)
-            ticks_arr = np.zeros(count, dtype=np.float64)
+            ticks_profit_arr = np.zeros(count, dtype=np.float64)
+            ticks_loss_arr = np.zeros(count, dtype=np.float64)
 
             for idx, pos in enumerate(positions):
                 pos_sym_idx = pos.get("sym_idx")
@@ -226,8 +231,10 @@ class Simulator:
                 point = pos.get("point")
                 points_arr[idx] = float(point) if point else 0.0
 
-                tick = pos.get("tick")
-                ticks_arr[idx] = float(tick) if tick else 0.0
+                tick_p = pos.get("tick_profit") or pos.get("tick")
+                tick_l = pos.get("tick_loss") or pos.get("tick")
+                ticks_profit_arr[idx] = float(tick_p) if tick_p else 0.0
+                ticks_loss_arr[idx] = float(tick_l) if tick_l else 0.0
 
             total_float, total_lots, open_count = _compute_equity_components(
                 bid_mark_prices,
@@ -236,7 +243,8 @@ class Simulator:
                 entry_prices_arr,
                 lot_sizes_arr,
                 points_arr,
-                ticks_arr,
+                ticks_profit_arr,
+                ticks_loss_arr,
                 spread_points,
             )
         else:

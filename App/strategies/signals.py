@@ -15,14 +15,8 @@ class StrategySignal_1:
         self.close_prices = input_data["Close"].values
 
     def generate_signals_for_candle(self, index: int):
-        # Señal simple basada en vela actual
-        try:
-            o = float(self.open_prices[index])
-            c = float(self.close_prices[index])
-        except Exception:
-            return False, False
-        signal_buy = bool(c > o)
-        signal_sell = bool(c < o)
+        signal_buy = True
+        signal_sell = True
         return signal_buy, signal_sell
 
 
@@ -40,16 +34,6 @@ class StrategySignal_2:
         self.close_prices = input_data["Close"].values
 
     def generate_signals_for_candle(self, index: int):
-        # Ejemplo con filtro de rango (High-Low)
-        try:
-            o = float(self.open_prices[index])
-            h = float(self.high_prices[index])
-            l = float(self.low_prices[index])
-            c = float(self.close_prices[index])
-        except Exception:
-            return False, False
-        rng = h - l
-        min_range = 0.0  # ajusta si deseas un filtro de rango
-        buy = (c >= o) and (rng >= min_range)
-        sell = (o > c) and (rng >= min_range)
+        buy = True
+        sell = True
         return bool(buy), bool(sell)
