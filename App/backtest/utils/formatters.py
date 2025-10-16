@@ -1,4 +1,5 @@
 # backtest/utils/formatters.py
+import json
 import pandas as pd
 from datetime import datetime, timedelta
 
@@ -45,3 +46,49 @@ def format_statistics(statistics: dict) -> pd.DataFrame:
     df.index.name = "Statistic"
     df["Value"] = df["Value"].apply(format_value)
     return df
+
+
+def _format_timedelta(td: timedelta) -> str:
+    total_seconds = int(td.total_seconds())
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{days} days {hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def statistics_to_json_obj(statistics: dict) -> dict:
+    """
+    Convierte el diccionario de estadísticas a un objeto JSON-serializable.
+    - datetime -> "YYYY-MM-DD HH:MM:SS"
+    - timedelta -> "X days HH:MM:SS"
+    - bool -> bool nativo
+    - números -> float/int nativos
+    """
+    if not statistics:
+        return {}
+
+    def to_jsonable(val):
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, datetime):
+            return val.strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(val, timedelta):
+            return _format_timedelta(val)
+        # numpy types u otros con `.item()`
+        try:
+            item = getattr(val, "item", None)
+            if callable(item):
+                return item()
+        except Exception:
+            pass
+        return val
+
+    return {k: to_jsonable(v) for k, v in statistics.items()}
+
+
+def statistics_to_json(statistics: dict) -> str:
+    """Serializa estadísticas a una cadena JSON (UTF-8, sin escape ASCII)."""
+    obj = statistics_to_json_obj(statistics)
+    return json.dumps(obj, ensure_ascii=False)

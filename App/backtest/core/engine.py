@@ -55,7 +55,8 @@ class BacktestEngine:
         result = self._finalize(em, sim)
 
         # Salidas opcionales controladas por configuración
-        if getattr(self.config, "print_statistics", False):
+        stats_mode = getattr(self.config, "get_statistics", "off")
+        if stats_mode == "print":
             try:
                 from backtest.utils.formatters import format_statistics
 
@@ -64,6 +65,15 @@ class BacktestEngine:
                 print(stats_df)
             except Exception as e:
                 print(f"[BacktestEngine] Error al imprimir estadísticas: {e}")
+        elif stats_mode == "json":
+            try:
+                from backtest.utils.formatters import statistics_to_json
+
+                result_json = statistics_to_json(result["statistics"])
+                # Unica clave pública para JSON rápido
+                result["json"] = result_json
+            except Exception as e:
+                print(f"[BacktestEngine] Error al serializar estadísticas JSON: {e}")
 
         if getattr(self.config, "plot_graph", False):
             try:

@@ -29,7 +29,7 @@ if __name__ == "__main__":
         commission_per_lot_side=3.5,
         spread_points=20,
         debug_mode="none",  # opciones: "none", "final", "realtime"
-        print_statistics=True,
+        get_statistics="print",  # opciones: 'off', 'json', 'print'
         plot_graph=False,
         strategies_params={
             "grid_buy": {  # simple_buy simple_sell grid_buy grid_sell
