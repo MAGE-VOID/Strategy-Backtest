@@ -4,9 +4,7 @@ import MetaTrader5 as mt5
 from data import custom as data
 from backtest.core.engine import BacktestEngine
 from backtest.config import BacktestConfig
-from backtest.utils.formatters import format_statistics
 from strategies.signals import StrategySignal_1, StrategySignal_2
-from visualization.plot import BacktestPlotter
 
 if __name__ == "__main__":
     # Conexión a MT5
@@ -30,6 +28,8 @@ if __name__ == "__main__":
         initial_balance=1000,
         commission_per_lot_side=3.5,
         debug_mode="none",  # opciones: "none", "final", "realtime"
+        print_statistics=True,
+        plot_graph=False,
         strategies_params={
             "grid_buy": {  # simple_buy simple_sell grid_buy grid_sell
                 "strategy_signal_class": StrategySignal_1,
@@ -54,9 +54,3 @@ if __name__ == "__main__":
 
     engine = BacktestEngine(config)
     result_backtest = engine.run_backtest(df)
-
-    stats_df = format_statistics(result_backtest["statistics"])
-    print("\n--- Backtest Statistics ---")
-    print(stats_df)
-
-    BacktestPlotter().show(result_backtest)

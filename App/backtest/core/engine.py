@@ -52,8 +52,28 @@ class BacktestEngine:
             self.debug_mode,
             strategies_order=self.strategies,
         )
-        stats = self._finalize(em, sim)
-        return stats
+        result = self._finalize(em, sim)
+
+        # Salidas opcionales controladas por configuración
+        if getattr(self.config, "print_statistics", False):
+            try:
+                from backtest.utils.formatters import format_statistics
+
+                stats_df = format_statistics(result["statistics"])
+                print("\n--- Backtest Statistics ---")
+                print(stats_df)
+            except Exception as e:
+                print(f"[BacktestEngine] Error al imprimir estadísticas: {e}")
+
+        if getattr(self.config, "plot_graph", False):
+            try:
+                from visualization.plot import BacktestPlotter
+
+                BacktestPlotter().show(result)
+            except Exception as e:
+                print(f"[BacktestEngine] Error al graficar: {e}")
+
+        return result
 
     def _setup_managers(self, symbol_points, symbols):
         em = EntryManager(
