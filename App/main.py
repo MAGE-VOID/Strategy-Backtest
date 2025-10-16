@@ -27,6 +27,7 @@ if __name__ == "__main__":
     config = BacktestConfig(
         initial_balance=1000,
         commission_per_lot_side=3.5,
+        spread_points=20,
         debug_mode="none",  # opciones: "none", "final", "realtime"
         print_statistics=True,
         plot_graph=False,

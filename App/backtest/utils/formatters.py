@@ -9,7 +9,7 @@ def format_statistics(statistics: dict) -> pd.DataFrame:
     - Números: con dos decimales y separador de miles.
     - Fechas: en formato "YYYY-MM-DD HH:MM:SS".
     - Duraciones (timedelta): en "X days HH:MM:SS".
-    - Booleanos: como "Yes" o "No".
+    - Booleanos: como "true" o "false".
 
     Parameters:
         statistics (dict): Diccionario de estadísticas a formatear.
@@ -22,6 +22,9 @@ def format_statistics(statistics: dict) -> pd.DataFrame:
         return pd.DataFrame()
 
     def format_value(val):
+        # Importante: bool es subclass de int, por eso se chequea primero
+        if isinstance(val, bool):
+            return "true" if val else "false"
         if isinstance(val, (int, float)):
             try:
                 return f"{val:,.2f}"
@@ -35,8 +38,6 @@ def format_statistics(statistics: dict) -> pd.DataFrame:
             hours, remainder = divmod(remainder, 3600)
             minutes, seconds = divmod(remainder, 60)
             return f"{days} days {hours:02d}:{minutes:02d}:{seconds:02d}"
-        elif isinstance(val, bool):
-            return "Yes" if val else "No"
         else:
             return val
 
