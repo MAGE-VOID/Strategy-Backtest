@@ -59,10 +59,17 @@ class BacktestEngine:
         if stats_mode == "print":
             try:
                 from backtest.utils.formatters import format_statistics
+                import pandas as pd
 
                 stats_df = format_statistics(result["statistics"])
                 print("\n--- Backtest Statistics ---")
-                print(stats_df)
+                with pd.option_context(
+                    "display.max_rows", None,
+                    "display.max_columns", None,
+                    "display.width", None,
+                    "display.max_colwidth", None,
+                ):
+                    print(stats_df.to_string(index=True, max_rows=None, max_cols=None, line_width=None))
             except Exception as e:
                 print(f"[BacktestEngine] Error al imprimir estadísticas: {e}")
         elif stats_mode == "json":

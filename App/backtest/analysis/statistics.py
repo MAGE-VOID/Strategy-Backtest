@@ -6,6 +6,55 @@ from typing import Any, Dict, List, Tuple, Optional
 import math
 import numpy as np
 from datetime import datetime, timedelta
+from time import perf_counter
+
+# Numba opcional: acelera paths críticos si está disponible
+try:
+    from numba import njit  # type: ignore
+except Exception:  # pragma: no cover - fallback cuando numba no está
+    def njit(*args, **kwargs):  # type: ignore
+        def decorator(func):
+            return func
+
+        return decorator
+
+
+@njit(cache=True, fastmath=True)
+def _dd_and_ulcer_numba(vals: np.ndarray) -> Tuple[float, float, float]:
+    """
+    Calcula Drawdown absoluto máximo, Drawdown relativo máximo (%) y Ulcer Index (%)
+    sobre una serie de equity 'vals'.
+    Implementación iterativa JIT para reducir overhead de Python en series largas.
+    """
+    n = vals.size
+    if n == 0:
+        return 0.0, 0.0, 0.0
+
+    peak = 0.0
+    max_dd_abs = 0.0
+    max_dd_pct = 0.0
+    sum_sq = 0.0
+
+    for i in range(n):
+        v = float(vals[i])
+        if not (v == v):  # NaN check
+            continue
+        if v > peak:
+            peak = v
+        dd_abs = peak - v
+        if dd_abs > max_dd_abs:
+            max_dd_abs = dd_abs
+        if peak > 0.0:
+            dd_pct_pos = dd_abs / peak * 100.0
+            if dd_pct_pos > max_dd_pct:
+                max_dd_pct = dd_pct_pos
+            dd_pct_neg = -dd_pct_pos
+        else:
+            dd_pct_neg = 0.0
+        sum_sq += dd_pct_neg * dd_pct_neg
+
+    ulcer_idx = math.sqrt(sum_sq / float(n)) if n > 0 else 0.0
+    return max_dd_abs, max_dd_pct, ulcer_idx
 
 
 # ============================== Utilidades básicas ==============================
@@ -98,6 +147,8 @@ class Statistics:
         equity_over_time: List[Dict[str, Any]],
         initial_balance: float,
     ):
+        # Marca de inicio para medir tiempo total de cálculo de estadísticas
+        self._t_start = perf_counter()
         self.initial_balance = float(initial_balance or 0.0)
         # Guardamos los eventos crudos para métricas adicionales (comisiones)
         self.events: List[Dict[str, Any]] = list(all_trades or [])
@@ -163,36 +214,66 @@ class Statistics:
     # ------------------------------ Serie temporal --------------------------------
 
     def _extract_time_series(self, rows: List[Dict[str, Any]]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        eq, bal, dt = [], [], []
+        # Ruta rápida: convertir en listas y luego a numpy una sola vez.
+        if not rows:
+            return np.array([]), np.array([]), np.array([])
+
+        eq_list: List[float] = []
+        bal_list: List[float] = []
+        dt_list: List[Any] = []
+        append_eq = eq_list.append
+        append_bal = bal_list.append
+        append_dt = dt_list.append
+
         for r in rows:
-            e, b, t = r.get("equity"), r.get("balance"), r.get("date")
+            e = r.get("equity")
+            b = r.get("balance")
+            t = r.get("date")
             if e is None or b is None or t is None:
                 continue
             try:
-                ee, bb = float(e), float(b)
+                ee = float(e)
+                bb = float(b)
             except Exception:
                 continue
-            ts = _to_datetime(t)
-            if ts is None:
-                continue
-            eq.append(ee), bal.append(bb), dt.append(ts)
+            append_eq(ee)
+            append_bal(bb)
+            append_dt(t)
 
-        if not dt:
+        if not dt_list:
             return np.array([]), np.array([]), np.array([])
 
-        dt_np = np.asarray(dt, dtype="datetime64[ns]")
+        # Intentar conversión vectorizada a datetime64[ns]
+        try:
+            dt_np = np.array(dt_list, dtype="datetime64[ns]")
+        except Exception:
+            # Fallback robusto por elemento
+            conv = []
+            for t in dt_list:
+                ts = _to_datetime(t)
+                if ts is not None:
+                    conv.append(ts)
+            if not conv:
+                return np.array([]), np.array([]), np.array([])
+            dt_np = np.array(conv, dtype="datetime64[ns]")
+
+        eq_np = np.asarray(eq_list, dtype=float)
+        bal_np = np.asarray(bal_list, dtype=float)
+        # Ordenar por tiempo
         order = np.argsort(dt_np)
-        eq_np = np.asarray(eq, dtype=float)[order]
-        bal_np = np.asarray(bal, dtype=float)[order]
         dt_np = dt_np[order]
-        mask = ~(np.isnan(eq_np) | np.isnan(bal_np))
+        eq_np = eq_np[order]
+        bal_np = bal_np[order]
+        # Filtrar NaNs en una sola pasada
+        with np.errstate(invalid="ignore"):
+            mask = ~(np.isnan(eq_np) | np.isnan(bal_np))
         return eq_np[mask], bal_np[mask], dt_np[mask]
 
     # ------------------------------ Drawdown utils --------------------------------
 
     @staticmethod
     def _dd_from_series(vals: np.ndarray) -> Tuple[float, float, np.ndarray]:
-        """Devuelve (max_dd_abs, max_dd_pct_pos, dd_series_pct_neg)."""
+        """Mantiene compatibilidad: (max_dd_abs, max_dd_pct_pos, dd_series_pct_neg)."""
         if vals.size == 0:
             return 0.0, 0.0, np.array([])
         m = np.maximum.accumulate(vals)
@@ -207,28 +288,12 @@ class Statistics:
         """
         Unión de intervalos para exposición (% del tiempo con al menos 1 trade),
         concurrencia máxima y concurrencia promedio ponderada en el tiempo.
+        Optimización: vectoriza la unión vía barrido de eventos con NumPy.
         """
         if not self.trades or self.dt_arr.size == 0:
             return timedelta(0), 0.0, 0, 0.0
 
-        # Intervalos (ordenados)
-        intervals = [(tr.open_time, tr.close_time) for tr in self.trades]
-        intervals.sort(key=lambda x: x[0])
-
-        # Unión
-        merged: List[Tuple[datetime, datetime]] = []
-        cs, ce = intervals[0]
-        for s, e in intervals[1:]:
-            if s <= ce:
-                ce = max(ce, e)
-            else:
-                merged.append((cs, ce))
-                cs, ce = s, e
-        merged.append((cs, ce))
-
-        total_exposed = sum((e - s for s, e in merged), timedelta(0))
-
-        # Duración total (segundos)
+        # Periodo total (segundos) en base a serie temporal de equity
         try:
             period_seconds = float((self.dt_arr[-1] - self.dt_arr[0]) / np.timedelta64(1, "s"))
         except Exception:
@@ -236,27 +301,39 @@ class Statistics:
             end = _to_datetime(str(self.dt_arr[-1]))
             period_seconds = (end - start).total_seconds() if (start and end) else 0.0
 
-        exposure_pct = (total_exposed.total_seconds() / period_seconds * 100.0) if period_seconds > 0 else 0.0
+        if period_seconds <= 0:
+            return timedelta(0), 0.0, 0, 0.0
 
-        # Concurrencia (line sweep). Cierre antes que apertura si coinciden.
-        events: List[Tuple[datetime, int, int]] = []
-        for s, e in intervals:
-            events.append((s, 1, +1))
-            events.append((e, 0, -1))
-        events.sort(key=lambda x: (x[0], x[1]))
+        # Construir arrays de eventos (apertura/cierre) en segundos
+        opens = np.array([_to_datetime(t.open_time) for t in self.trades], dtype="datetime64[s]")
+        closes = np.array([_to_datetime(t.close_time) for t in self.trades], dtype="datetime64[s]")
+        times = np.concatenate([opens, closes]).astype("datetime64[s]").astype(np.int64)
+        # Orden secundario: 0=cierre, 1=apertura (cierre antes que apertura si coinciden)
+        ord2 = np.concatenate([
+            np.ones(opens.size, dtype=np.int8),
+            np.zeros(closes.size, dtype=np.int8),
+        ])
+        idx = np.lexsort((ord2, times))
+        times_sorted = times[idx]
+        deltas_sorted = np.where(ord2[idx] == 1, 1, -1).astype(np.int64)
 
-        peak, cur, area = 0, 0, 0.0
-        last_t = events[0][0]
-        for t, _, dlt in events:
-            dt_sec = (t - last_t).total_seconds()
-            if dt_sec > 0:
-                area += cur * dt_sec
-            cur += dlt
-            peak = max(peak, cur)
-            last_t = t
+        # Conteo tras cada evento y duraciones entre eventos
+        cur_after = np.cumsum(deltas_sorted)
+        if times_sorted.size <= 1:
+            return timedelta(0), 0.0, int(cur_after.max() if cur_after.size else 0), 0.0
+        dt_sec = np.diff(times_sorted).astype(np.float64)
 
+        # Exposición: segmentos con concurrencia > 0
+        exp_seconds = float(np.sum(dt_sec * (cur_after[:-1] > 0)))
+        exposure_td = timedelta(seconds=int(exp_seconds))
+        exposure_pct = (exp_seconds / period_seconds * 100.0) if period_seconds > 0 else 0.0
+
+        # Promedio ponderado por tiempo de la concurrencia
+        area = float(np.sum(dt_sec * cur_after[:-1].astype(np.float64)))
         avg_conc = (area / period_seconds) if period_seconds > 0 else 0.0
-        return total_exposed, exposure_pct, peak, avg_conc
+        peak = int(cur_after.max()) if cur_after.size else 0
+
+        return exposure_td, exposure_pct, peak, avg_conc
 
     # ------------------------------ Retornos y ratios -----------------------------
 
@@ -318,8 +395,13 @@ class Statistics:
         equity_peak = float(np.nanmax(eq)) if eq.size else self.initial_balance
         balance_peak = float(np.nanmax(bal)) if bal.size else self.initial_balance
 
-        # Drawdowns
-        eq_dd_abs, eq_dd_pct_pos, eq_dd_series = self._dd_from_series(eq)
+        # Drawdowns (acelerado con Numba cuando está disponible)
+        try:
+            eq_dd_abs, eq_dd_pct_pos, ulcer_idx = _dd_and_ulcer_numba(eq)
+        except Exception:
+            eq_dd_abs, eq_dd_pct_pos, eq_dd_series = self._dd_from_series(eq)
+            ulcer_idx = self._ulcer_index(eq_dd_series)
+
         bal_dd_abs, bal_dd_pct_pos, _ = self._dd_from_series(bal)
 
         # Retornos y ratios
@@ -391,27 +473,38 @@ class Statistics:
         # Exposición / concurrencia
         exposure_td, exposure_pct, peak_conc, avg_conc = self._exposure_and_concurrency()
 
-        # Rachas
-        max_wins = max_losses = cw = cl = 0
-        for tr in self.trades:
-            if tr.profit > 0:
-                cw += 1; cl = 0
-            elif tr.profit < 0:
-                cl += 1; cw = 0
-            max_wins = max(max_wins, cw)
-            max_losses = max(max_losses, cl)
+        # Rachas (vectorizado)
+        def _max_run_true(mask: np.ndarray) -> int:
+            if mask.size == 0:
+                return 0
+            # Padding con ceros a ambos lados y medir gaps de True
+            a = mask.astype(np.int8)
+            # Encuentra índices donde hay ceros (False) con padding
+            z = np.where(np.concatenate(([0], 1 - a, [0])))[0]
+            # Diferencias - 1 dan longitudes de runs de True
+            runs = z[1:] - z[:-1] - 1
+            return int(runs.max()) if runs.size else 0
 
-        # Lados
-        buy_trades = sum(1 for t in self.trades if t.side == "long")
-        sell_trades = total_trades - buy_trades
-        long_wins = sum(1 for t in self.trades if t.side == "long" and t.profit > 0)
-        short_wins = sum(1 for t in self.trades if t.side == "short" and t.profit > 0)
+        wins_mask = profits > 0
+        losses_mask = profits < 0
+        max_wins = _max_run_true(wins_mask)
+        max_losses = _max_run_true(losses_mask)
+
+        # Lados (vectorizado)
+        if self.trades:
+            long_mask = np.array([t.side == "long" for t in self.trades], dtype=bool)
+            buy_trades = int(long_mask.sum())
+            sell_trades = int(total_trades - buy_trades)
+            win_mask = profits > 0
+            long_wins = int(np.logical_and(long_mask, win_mask).sum())
+            short_wins = int((~long_mask & win_mask).sum())
+        else:
+            buy_trades = sell_trades = long_wins = short_wins = 0
         long_wr = (long_wins / buy_trades * 100.0) if buy_trades > 0 else 0.0
         short_wr = (short_wins / sell_trades * 100.0) if sell_trades > 0 else 0.0
 
         # VaR y Ulcer
         var_95 = self._var_95(final_equity, ret_1p)
-        ulcer_idx = self._ulcer_index(eq_dd_series)
 
         # Sanidad
         open_pl_end = final_equity - final_balance
@@ -502,6 +595,13 @@ class Statistics:
             "SQN": out_sqn,
             "Kelly Criterion": out_kelly,
         }
+
+        # Tiempo total en segundos desde recepción de datos hasta salida final
+        try:
+            elapsed = float(perf_counter() - getattr(self, "_t_start", 0.0))
+        except Exception:
+            elapsed = 0.0
+        out["statistics_seconds_calculation"] = elapsed
 
         # Métricas relativas al balance inicial
         if self.initial_balance > 0:
